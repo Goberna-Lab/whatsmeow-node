@@ -6,6 +6,10 @@ import (
 	"fmt"
 	"os"
 	"sync"
+
+	"go.mau.fi/whatsmeow/proto/waCompanionReg"
+	"go.mau.fi/whatsmeow/store"
+	"google.golang.org/protobuf/proto"
 )
 
 // ── Protocol types ──────────────────────────────────────────
@@ -72,6 +76,25 @@ func logError(msg string, err error) {
 }
 
 // ── Main loop ───────────────────────────────────────────────
+
+// The phone only sends its call log to a companion that declared it can handle
+// one, and whatsmeow's default DeviceProps say it cannot:
+//
+//	store/clientpayload.go:  SupportCallLogHistory: proto.Bool(false)
+//
+// With that flag off, `call:log` never fires — not because the events are
+// dropped, but because the data is never sent in the first place. Forwarding the
+// events without flipping this looks like a line that simply never had calls.
+//
+// DeviceProps travel in the REGISTRATION payload, so this only takes effect for
+// devices paired after it is set: an already-linked session has to be linked
+// again to start receiving the call log.
+func init() {
+	if store.DeviceProps.HistorySyncConfig == nil {
+		store.DeviceProps.HistorySyncConfig = &waCompanionReg.DeviceProps_HistorySyncConfig{}
+	}
+	store.DeviceProps.HistorySyncConfig.SupportCallLogHistory = proto.Bool(true)
+}
 
 func main() {
 	app := newApp()

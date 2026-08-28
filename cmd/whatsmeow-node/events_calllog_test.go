@@ -4,8 +4,19 @@ import (
 	"testing"
 
 	"go.mau.fi/whatsmeow/proto/waSyncAction"
+	"go.mau.fi/whatsmeow/store"
 	"google.golang.org/protobuf/proto"
 )
+
+// The phone only sends its call log to a companion that declared it can handle
+// one. Losing this flag breaks no build and no other test: it just means
+// `call:log` never fires again, which reads exactly like a line that never had
+// a single call.
+func TestSupportCallLogHistoryIsRequested(t *testing.T) {
+	if !store.DeviceProps.GetHistorySyncConfig().GetSupportCallLogHistory() {
+		t.Fatal("SupportCallLogHistory must be true — whatsmeow defaults it to false and the phone then sends nothing")
+	}
+}
 
 // A record without a call ID cannot be deduplicated by the consumer, so it is
 // dropped rather than forwarded: keeping it would duplicate a row on every

@@ -1,0 +1,21 @@
+{
+  "name": "@whatsmeow-node/whatsmeow-node",
+  "version": "0.7.0-goberna.1",
+  "description": "Fork de @whatsmeow-node/whatsmeow-node con el registro de llamadas (call:log) — ver README-GOBERNA.md",
+  "license": "MIT",
+  "type": "module",
+  "main": "ts/dist/index.cjs",
+  "module": "ts/dist/index.js",
+  "types": "ts/dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./ts/dist/index.d.ts",
+      "import": "./ts/dist/index.js",
+      "require": "./ts/dist/index.cjs"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Goberna-Lab/whatsmeow-node.git"
+  }
+}

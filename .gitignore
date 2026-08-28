@@ -1,9 +1,13 @@
 # Go binary (at repo root only, not cmd/whatsmeow-node/ source dir)
-/whatsmeow-node
+#
+# GOBERNA: el binario de la raiz SI se commitea en este fork. Es la ruta que
+# resolveBinary() mira primero, y `npm ci` en el VPS no compila Go.
+# /whatsmeow-node
 *.exe
 
 # Node / TypeScript
-ts/dist/
+# GOBERNA: ts/dist tambien se commitea — el VPS no compila TypeScript.
+# ts/dist/
 ts/node_modules/
 ts/*.db
 ts/*.db-*

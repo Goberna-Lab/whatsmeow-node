@@ -1,6 +1,7 @@
 package main
 
 import (
+	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -167,10 +168,83 @@ func (a *App) eventHandler(evt interface{}) {
 		sendEvent("history_sync", map[string]interface{}{
 			"type": v.Data.GetSyncType().String(),
 		})
+		// The phone pushes its call log alongside the message history. Each
+		// record is forwarded on its own so the Node side has a single shape to
+		// handle, whether it came from the initial sync or from a later
+		// app-state patch.
+		for _, r := range v.Data.GetCallLogRecords() {
+			if rec := serializeCallLogRecord(r, "history"); rec != nil {
+				sendEvent("call:log", rec)
+			}
+		}
+
+	// ── App state ────────────────────────────────
+	// Call log entries keep arriving here after the initial history sync: every
+	// call placed or received on the phone becomes a callLogAction patch.
+	// Without this case those updates never leave the Go process.
+	case *events.AppState:
+		if action := v.GetCallLogAction(); action != nil {
+			if rec := serializeCallLogRecord(action.GetCallLogRecord(), "appstate"); rec != nil {
+				sendEvent("call:log", rec)
+			}
+		}
 	}
 }
 
 // ── Serialization helpers ────────────────────────────
+
+// serializeCallLogRecord flattens a CallLogRecord into the JSON the Node side
+// receives. Returns nil when there is no usable record: a call without an ID
+// cannot be deduplicated, and silently keeping it would duplicate rows on every
+// re-sync.
+//
+// Enums are sent as their protobuf names (CONNECTED, MISSED, REJECTED,
+// DECLINED, CANCELLED, ABANDONED, ACCEPTED_ELSEWHERE) rather than as numbers, so
+// a consumer never has to keep its own copy of the enum ordering — that mapping
+// would silently rot the day a value is inserted in the middle.
+func serializeCallLogRecord(r *waSyncAction.CallLogRecord, source string) map[string]interface{} {
+	if r == nil || r.GetCallID() == "" {
+		return nil
+	}
+
+	out := map[string]interface{}{
+		"source":         source,
+		"callId":         r.GetCallID(),
+		"callCreatorJid": r.GetCallCreatorJID(),
+		"result":         r.GetCallResult().String(),
+		"callType":       r.GetCallType().String(),
+		"isIncoming":     r.GetIsIncoming(),
+		"isVideo":        r.GetIsVideo(),
+		"isCallLink":     r.GetIsCallLink(),
+		"isDndMode":      r.GetIsDndMode(),
+		"duration":       r.GetDuration(),
+		// Seconds since the epoch, as WhatsApp stores it. Left as a number on
+		// purpose: turning it into a string here would bake this process's
+		// timezone into the data.
+		"startTime": r.GetStartTime(),
+	}
+
+	if r.SilenceReason != nil {
+		out["silenceReason"] = r.GetSilenceReason().String()
+	}
+	if r.GroupJID != nil {
+		out["groupJid"] = r.GetGroupJID()
+	}
+	if r.ScheduledCallID != nil {
+		out["scheduledCallId"] = r.GetScheduledCallID()
+	}
+
+	participants := make([]map[string]interface{}, 0, len(r.GetParticipants()))
+	for _, p := range r.GetParticipants() {
+		participants = append(participants, map[string]interface{}{
+			"jid":        p.GetUserJID(),
+			"callResult": p.GetCallResult().String(),
+		})
+	}
+	out["participants"] = participants
+
+	return out
+}
 
 func serializeMessageInfo(info types.MessageInfo) map[string]interface{} {
 	return map[string]interface{}{

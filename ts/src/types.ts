@@ -344,6 +344,37 @@ export interface WhatsmeowEvents {
   "call:accept": { from: JID; callId: string };
   "call:terminate": { from: JID; callId: string; reason: string };
   identity_change: { jid: JID; timestamp: number };
+  /**
+   * One entry of the phone's own call log — the list shown in WhatsApp's
+   * "Calls" tab, including calls placed from the phone itself.
+   *
+   * Arrives from two places, told apart by `source`: `"history"` for the batch
+   * the phone pushes when the device is linked, and `"appstate"` for every call
+   * that happens afterwards. Both carry the same shape, so a consumer only
+   * needs one handler.
+   *
+   * `result` and `callType` are the protobuf enum names, not numbers, so the
+   * consumer never has to mirror the enum ordering. `startTime` is seconds
+   * since the epoch and `duration` is in seconds (0 when the call never
+   * connected).
+   */
+  "call:log": {
+    source: "history" | "appstate";
+    callId: string;
+    callCreatorJid: string;
+    result: string;
+    callType: string;
+    isIncoming: boolean;
+    isVideo: boolean;
+    isCallLink: boolean;
+    isDndMode: boolean;
+    duration: number;
+    startTime: number;
+    silenceReason?: string;
+    groupJid?: string;
+    scheduledCallId?: string;
+    participants: { jid: string; callResult: string }[];
+  };
   history_sync: { type: string };
   qr: { code: string };
   "qr:timeout": null;

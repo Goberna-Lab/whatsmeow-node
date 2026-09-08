@@ -237,6 +237,28 @@ interface GroupInfoEvent {
     promote?: JID[];
     demote?: JID[];
 }
+/**
+ * Who the Go binary is, as answered by the `version` command.
+ *
+ * This exists because the failure it guards against is total and silent. This
+ * fork adds events upstream does not have; with upstream's binary installed
+ * those events are never emitted, every subscription stays quiet, and nothing
+ * raises an error — a consumer cannot tell "nothing happened" from "this binary
+ * cannot tell me when it happens".
+ *
+ * Ask before depending on anything: compare `events` against the event names you
+ * subscribe to, and say so loudly if one is missing.
+ */
+interface BinaryVersion {
+    /** `"goberna"` for this fork. Anything else is a binary without its events. */
+    fork: string;
+    /** The fork's own version, e.g. `"0.7.0-goberna.4"`. */
+    version: string;
+    /** The whatsmeow build it was linked against, read from the embedded module info. */
+    whatsmeow: string;
+    /** Every event name this binary can emit. Checked against the source in CI. */
+    events: string[];
+}
 interface WhatsmeowEvents {
     connected: {
         jid: JID;
@@ -419,6 +441,23 @@ interface WhatsmeowEvents {
         timestamp: number;
         fromFullSync: boolean;
     };
+    /**
+     * An event type crossed the Go switch without a case of its own — this bridge
+     * is dropping it.
+     *
+     * 🔴 Only the Go type name crosses, never the payload: an unhandled event can
+     * carry a contact's name, a phone number or message text, and none of it has a
+     * consumer here. The question this answers is "what are we dropping?", which
+     * the name alone answers.
+     *
+     * Reported at powers of ten (`count` is 1, 10, 100…), not on every sighting: a
+     * full app-state sync fires thousands of `*events.Contact`, and a report per
+     * event would flood the same pipe real traffic uses.
+     */
+    "event:unhandled": {
+        type: string;
+        count: number;
+    };
     history_sync: {
         type: string;
     };
@@ -456,6 +495,15 @@ declare class WhatsmeowClient extends EventEmitter {
     connect(): Promise<void>;
     disconnect(): Promise<void>;
     logout(): Promise<void>;
+    /**
+     * Who this binary is, and what it can emit.
+     *
+     * Needs no session: it is meant to be asked right after the process starts, to
+     * decide whether this build can do what you are about to depend on. Throws on
+     * a binary that predates the command — which is itself the answer, and the one
+     * a consumer has to handle rather than let pass.
+     */
+    version(): Promise<BinaryVersion>;
     isConnected(): Promise<boolean>;
     isLoggedIn(): Promise<boolean>;
     waitForConnection(timeoutMs?: number): Promise<boolean>;
@@ -611,4 +659,4 @@ declare class ProcessExitedError extends WhatsmeowError {
 
 declare function createClient(options: ClientOptions): WhatsmeowClient;
 
-export { type AppStatePatchName, type Blocklist, type BlocklistAction, type BotListInfo, type BotProfileInfo, type BusinessMessageLinkTarget, type BusinessProfile, type ChatPresence, type ChatPresenceMedia, type ClientOptions, type ContactQRLinkTarget, type ContextInfo, type ExtendedTextMessage, type GroupInfo, type GroupInfoEvent, type GroupMemberAddMode, type GroupParticipant, type GroupRequestParticipant, type InitResult, type IsOnWhatsAppResult, type JID, type MediaType, type MessageContent, type MessageInfo, type NewsletterInfo, type NewsletterMessage, type NewsletterMetadata, type NewsletterUploadResponse, type ParticipantRequestAction, type Presence, type PrivacySettingName, type PrivacySettingValue, type PrivacySettings, ProcessExitedError, type ProfilePicture, type SendResponse, type StatusPrivacy, type StatusPrivacyType, type StickerPack, type StickerPackItem, type SubGroupInfo, type TextMessage, TimeoutError, type UploadResponse, type UserInfo, WhatsmeowClient, WhatsmeowError, type WhatsmeowEvents, createClient };
+export { type AppStatePatchName, type BinaryVersion, type Blocklist, type BlocklistAction, type BotListInfo, type BotProfileInfo, type BusinessMessageLinkTarget, type BusinessProfile, type ChatPresence, type ChatPresenceMedia, type ClientOptions, type ContactQRLinkTarget, type ContextInfo, type ExtendedTextMessage, type GroupInfo, type GroupInfoEvent, type GroupMemberAddMode, type GroupParticipant, type GroupRequestParticipant, type InitResult, type IsOnWhatsAppResult, type JID, type MediaType, type MessageContent, type MessageInfo, type NewsletterInfo, type NewsletterMessage, type NewsletterMetadata, type NewsletterUploadResponse, type ParticipantRequestAction, type Presence, type PrivacySettingName, type PrivacySettingValue, type PrivacySettings, ProcessExitedError, type ProfilePicture, type SendResponse, type StatusPrivacy, type StatusPrivacyType, type StickerPack, type StickerPackItem, type SubGroupInfo, type TextMessage, TimeoutError, type UploadResponse, type UserInfo, WhatsmeowClient, WhatsmeowError, type WhatsmeowEvents, createClient };

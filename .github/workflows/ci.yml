@@ -16,6 +16,7 @@ jobs:
       - run: go run ./scripts/check-client-parity
       - run: go build ./cmd/whatsmeow-node
       - run: go vet ./...
+      - run: go test ./...
 
   build-ts:
     runs-on: ubuntu-latest

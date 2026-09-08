@@ -1,7 +1,7 @@
 {
   "name": "@whatsmeow-node/whatsmeow-node",
-  "version": "0.7.0-goberna.3",
-  "description": "Fork de @whatsmeow-node/whatsmeow-node con el registro de llamadas (call:log) — ver README-GOBERNA.md",
+  "version": "0.7.0-goberna.4",
+  "description": "Fork de @whatsmeow-node/whatsmeow-node con los eventos que el puente descartaba: registro de llamadas, etiquetas de WhatsApp Business, mensajes no descifrables y sesión tomada — ver README-GOBERNA.md",
   "license": "MIT",
   "type": "module",
   "main": "ts/dist/index.cjs",

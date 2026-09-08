@@ -1,6 +1,8 @@
 package main
 
 import (
+	"time"
+
 	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -33,6 +35,13 @@ func (a *App) eventHandler(evt interface{}) {
 			"code": v.Code,
 		})
 
+	// Another client connected with the same session keys and took the socket
+	// over. It is not coming back on its own, and without this event nothing
+	// told the Node side: the connection state kept saying "connected" while the
+	// line was already deaf.
+	case *events.StreamReplaced:
+		sendEvent("stream_replaced", map[string]interface{}{})
+
 	case *events.TemporaryBan:
 		sendEvent("temporary_ban", map[string]interface{}{
 			"code":   v.Code.String(),
@@ -52,6 +61,20 @@ func (a *App) eventHandler(evt interface{}) {
 		sendEvent("message", map[string]interface{}{
 			"info":    serializeMessageInfo(v.Info),
 			"message": protoToMap(v.Message),
+		})
+
+	// A message arrived and could not be decrypted. whatsmeow asks the sender to
+	// retry on its own, and if that works a normal `message` follows; when it
+	// does not, this is the only trace that the conversation is missing a turn.
+	case *events.UndecryptableMessage:
+		sendEvent("message:undecryptable", map[string]interface{}{
+			"info":          serializeMessageInfo(v.Info),
+			"isUnavailable": v.IsUnavailable,
+			// These two travel even when empty. Upstream an empty string is a
+			// value and not an absence: "" is DecryptFailShow, and an unknown
+			// unavailable type is also "".
+			"unavailableType": string(v.UnavailableType),
+			"decryptFailMode": string(v.DecryptFailMode),
 		})
 
 	case *events.Receipt:
@@ -182,11 +205,39 @@ func (a *App) eventHandler(evt interface{}) {
 	// Call log entries keep arriving here after the initial history sync: every
 	// call placed or received on the phone becomes a callLogAction patch.
 	// Without this case those updates never leave the Go process.
+	//
+	// Only the call log is read here. whatsmeow dispatches this event *in
+	// addition to* the typed one for the same mutation, so anything that has a
+	// typed event of its own — the labels below, for instance — must be handled
+	// there and not here, or it would be emitted twice.
 	case *events.AppState:
 		if action := v.GetCallLogAction(); action != nil {
 			if rec := serializeCallLogRecord(action.GetCallLogRecord(), "appstate"); rec != nil {
 				sendEvent("call:log", rec)
 			}
+		}
+
+	// ── Labels ───────────────────────────────────
+	// The labels a WhatsApp Business account puts on chats and messages. They
+	// travel through app state, and these typed events are the source to use:
+	// they carry the label, chat and message IDs already parsed out of the
+	// mutation index, and they are dispatched for removals too, which the raw
+	// AppState event above is not.
+	case *events.LabelEdit:
+		if data := serializeLabelEdit(v); data != nil {
+			sendEvent("label:edit", data)
+		}
+
+	case *events.LabelAssociationChat:
+		if data := serializeLabelAssociation(v.JID, v.LabelID, v.Timestamp, v.Action, v.FromFullSync); data != nil {
+			sendEvent("label:chat", data)
+		}
+
+	case *events.LabelAssociationMessage:
+		data := serializeLabelAssociation(v.JID, v.LabelID, v.Timestamp, v.Action, v.FromFullSync)
+		if data != nil && v.MessageID != "" {
+			data["messageId"] = v.MessageID
+			sendEvent("label:message", data)
 		}
 	}
 }
@@ -244,6 +295,60 @@ func serializeCallLogRecord(r *waSyncAction.CallLogRecord, source string) map[st
 	out["participants"] = participants
 
 	return out
+}
+
+// serializeLabelEdit flattens a label creation, rename or deletion. Returns nil
+// when the event cannot be applied: without a label ID there is nothing to key
+// the row on, and without an action every field would read as its zero value —
+// which would turn a deletion into a nameless label that never goes away.
+//
+// `color` is WhatsApp's own palette index, forwarded as the number it is: unlike
+// an enum it has no name to send instead, and the palette is the consumer's to
+// map. `timestamp` is raw epoch seconds, like every other timestamp here.
+func serializeLabelEdit(v *events.LabelEdit) map[string]interface{} {
+	if v == nil || v.LabelID == "" || v.Action == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"labelId":      v.LabelID,
+		"name":         v.Action.GetName(),
+		"color":        v.Action.GetColor(),
+		"deleted":      v.Action.GetDeleted(),
+		"timestamp":    v.Timestamp.Unix(),
+		"fromFullSync": v.FromFullSync,
+	}
+}
+
+// serializeLabelAssociation builds the payload shared by label:chat and
+// label:message — a label being put on or taken off something.
+//
+// Returns nil when the association cannot be keyed or applied. The action
+// matters most: with it missing, `labeled` would default to false, which reads
+// as a deliberate un-labeling and is indistinguishable from one. Dropping a
+// silent event is recoverable; silently stripping a seller's labels is not.
+//
+// `fromFullSync` tells the batch WhatsApp re-sends on a full app-state sync
+// apart from a label the seller just changed — the same job `source` does on
+// call:log.
+func serializeLabelAssociation(
+	jid types.JID,
+	labelID string,
+	timestamp time.Time,
+	action *waSyncAction.LabelAssociationAction,
+	fromFullSync bool,
+) map[string]interface{} {
+	if labelID == "" || jid.IsEmpty() || action == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"jid":          jid.String(),
+		"labelId":      labelID,
+		"labeled":      action.GetLabeled(),
+		"timestamp":    timestamp.Unix(),
+		"fromFullSync": fromFullSync,
+	}
 }
 
 func serializeMessageInfo(info types.MessageInfo) map[string]interface{} {

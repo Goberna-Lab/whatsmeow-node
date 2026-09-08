@@ -248,6 +248,15 @@ interface WhatsmeowEvents {
     stream_error: {
         code: string;
     };
+    /**
+     * Another client connected with the same session keys and took the socket
+     * over. The connection is gone and it will not come back on its own.
+     *
+     * Usually a second process opened on the same store file. Nothing else
+     * reports it: without this event the client keeps looking connected while the
+     * line is already deaf.
+     */
+    stream_replaced: Record<string, never>;
     temporary_ban: {
         code: string;
         expire: string;
@@ -259,6 +268,26 @@ interface WhatsmeowEvents {
     message: {
         info: MessageInfo;
         message: Record<string, unknown>;
+    };
+    /**
+     * A message arrived and could not be decrypted.
+     *
+     * whatsmeow asks the sender to retry on its own; when that works a normal
+     * `message` follows carrying the same `info.id`. When it does not, this event
+     * is the only trace that the conversation is missing a turn.
+     *
+     * `unavailableType` and `decryptFailMode` are forwarded exactly as whatsmeow
+     * reports them, empty string included — upstream an empty string is a value,
+     * not an absence. For `decryptFailMode`, `""` means the message should still
+     * be shown and `"hide"` means it should not; for `unavailableType`, `""`
+     * means the reason is unknown and `"view_once"` means the message was never
+     * meant to be readable twice.
+     */
+    "message:undecryptable": {
+        info: MessageInfo;
+        isUnavailable: boolean;
+        unavailableType: string;
+        decryptFailMode: string;
     };
     "message:receipt": {
         type: string;
@@ -339,6 +368,56 @@ interface WhatsmeowEvents {
             jid: string;
             callResult: string;
         }[];
+    };
+    /**
+     * A label of a WhatsApp Business account was created, renamed, recoloured or
+     * deleted on the phone.
+     *
+     * Deleting does not withhold the event: it arrives with `deleted: true`, which
+     * is what tells a consumer to stop showing a label the seller already removed.
+     *
+     * `color` is WhatsApp's own palette index, not a CSS colour — the palette is
+     * the consumer's to map. `timestamp` is seconds since the epoch, unformatted.
+     *
+     * `fromFullSync` marks the batch WhatsApp re-sends whenever it syncs app state
+     * in full, as opposed to a label the seller just edited. It does the same job
+     * `source` does on `call:log`: a re-sync of 700 existing labels is not 700 new
+     * edits, and a consumer that treats it as such will double-count.
+     */
+    "label:edit": {
+        labelId: string;
+        name: string;
+        color: number;
+        deleted: boolean;
+        timestamp: number;
+        fromFullSync: boolean;
+    };
+    /**
+     * A label was put on or taken off a chat.
+     *
+     * `labeled` says which, and `false` is a real un-labeling rather than a
+     * missing value — the bridge drops any association it cannot read instead of
+     * letting it default to `false`, precisely so this field can be trusted.
+     */
+    "label:chat": {
+        jid: JID;
+        labelId: string;
+        labeled: boolean;
+        timestamp: number;
+        fromFullSync: boolean;
+    };
+    /**
+     * A label was put on or taken off a single message. Same shape as
+     * `label:chat` plus the message it applies to; `jid` is the chat the message
+     * lives in.
+     */
+    "label:message": {
+        jid: JID;
+        labelId: string;
+        messageId: string;
+        labeled: boolean;
+        timestamp: number;
+        fromFullSync: boolean;
     };
     history_sync: {
         type: string;

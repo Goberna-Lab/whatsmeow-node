@@ -45,6 +45,7 @@ export type {
   ClientOptions,
   StickerPack,
   StickerPackItem,
+  BinaryVersion,
 } from "./types.js";
 
 import { WhatsmeowClient } from "./client.js";

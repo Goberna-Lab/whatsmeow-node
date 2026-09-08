@@ -15,6 +15,13 @@ type App struct {
 	container *sqlstore.Container
 	ctx       context.Context
 	cancel    context.CancelFunc
+
+	// How many times each event type has fallen through the switch, keyed by its
+	// Go type name. Guarded by its own mutex and not `mu`: `mu` protects the
+	// session, and taking it from the event handler would put the reporting of a
+	// dropped event in the path of every connect and disconnect.
+	unhandledMu sync.Mutex
+	unhandled   map[string]int
 }
 
 func newApp() *App {
@@ -37,6 +44,11 @@ func (a *App) shutdown() {
 func (a *App) handleCommand(cmd Command) {
 	switch cmd.Cmd {
 	// Connection & Auth
+	// Who this binary is. Answered without a session on purpose: a consumer asks
+	// before `init`, to decide whether this build can do what it depends on.
+	case "version":
+		a.cmdVersion(cmd)
+
 	case "init":
 		a.cmdInit(cmd)
 	case "connect":

@@ -312,6 +312,30 @@ export interface GroupInfoEvent {
   demote?: JID[];
 }
 
+// ── Binary identity ────────────────────────────────
+/**
+ * Who the Go binary is, as answered by the `version` command.
+ *
+ * This exists because the failure it guards against is total and silent. This
+ * fork adds events upstream does not have; with upstream's binary installed
+ * those events are never emitted, every subscription stays quiet, and nothing
+ * raises an error — a consumer cannot tell "nothing happened" from "this binary
+ * cannot tell me when it happens".
+ *
+ * Ask before depending on anything: compare `events` against the event names you
+ * subscribe to, and say so loudly if one is missing.
+ */
+export interface BinaryVersion {
+  /** `"goberna"` for this fork. Anything else is a binary without its events. */
+  fork: string;
+  /** The fork's own version, e.g. `"0.7.0-goberna.4"`. */
+  version: string;
+  /** The whatsmeow build it was linked against, read from the embedded module info. */
+  whatsmeow: string;
+  /** Every event name this binary can emit. Checked against the source in CI. */
+  events: string[];
+}
+
 // ── Events ─────────────────────────────────────────
 export interface WhatsmeowEvents {
   connected: { jid: JID };
@@ -454,6 +478,20 @@ export interface WhatsmeowEvents {
     timestamp: number;
     fromFullSync: boolean;
   };
+  /**
+   * An event type crossed the Go switch without a case of its own — this bridge
+   * is dropping it.
+   *
+   * 🔴 Only the Go type name crosses, never the payload: an unhandled event can
+   * carry a contact's name, a phone number or message text, and none of it has a
+   * consumer here. The question this answers is "what are we dropping?", which
+   * the name alone answers.
+   *
+   * Reported at powers of ten (`count` is 1, 10, 100…), not on every sighting: a
+   * full app-state sync fires thousands of `*events.Contact`, and a report per
+   * event would flood the same pipe real traffic uses.
+   */
+  "event:unhandled": { type: string; count: number };
   history_sync: { type: string };
   qr: { code: string };
   "qr:timeout": null;

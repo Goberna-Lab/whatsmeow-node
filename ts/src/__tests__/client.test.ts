@@ -96,6 +96,18 @@ describe("WhatsmeowClient", () => {
       expect(send).toHaveBeenCalledWith("logout");
     });
 
+    it("version asks the binary who it is", async () => {
+      const identidad = {
+        fork: "goberna",
+        version: "0.7.0-goberna.4",
+        whatsmeow: "v0.0.0-20260611094716-089932318bc2",
+        events: ["call:log", "label:edit"],
+      };
+      mockResolve(send, identidad);
+      expect(await client.version()).toEqual(identidad);
+      expect(send).toHaveBeenCalledWith("version");
+    });
+
     it("isConnected extracts connected boolean", async () => {
       mockResolve(send, { connected: true });
       expect(await client.isConnected()).toBe(true);

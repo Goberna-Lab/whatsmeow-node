@@ -43,6 +43,38 @@ func captureEvents(t *testing.T, fn func()) []Event {
 	return emitted
 }
 
+// captureResponses is captureEvents for the other half of the protocol: the
+// replies to commands, which travel over the same encoder.
+func captureResponses(t *testing.T, fn func()) []Response {
+	t.Helper()
+
+	var buf bytes.Buffer
+
+	outMu.Lock()
+	previous := outEnc
+	outEnc = json.NewEncoder(&buf)
+	outMu.Unlock()
+
+	defer func() {
+		outMu.Lock()
+		outEnc = previous
+		outMu.Unlock()
+	}()
+
+	fn()
+
+	var replies []Response
+	decoder := json.NewDecoder(&buf)
+	for decoder.More() {
+		var r Response
+		if err := decoder.Decode(&r); err != nil {
+			t.Fatalf("could not decode a command reply: %v", err)
+		}
+		replies = append(replies, r)
+	}
+	return replies
+}
+
 // eventsNamed returns the payloads of the events emitted under a given name, as
 // the maps a JSON consumer sees.
 func eventsNamed(emitted []Event, name string) []map[string]interface{} {

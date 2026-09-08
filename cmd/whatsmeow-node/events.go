@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"time"
 
 	"go.mau.fi/whatsmeow/proto/waSyncAction"
@@ -239,7 +240,59 @@ func (a *App) eventHandler(evt interface{}) {
 			data["messageId"] = v.MessageID
 			sendEvent("label:message", data)
 		}
+
+	// ── Everything else ──────────────────────────
+	// Until this case existed the switch was closed and had no default, so an
+	// event type without a case of its own vanished here: no error, no log, no
+	// trace. That silence is why every hole in this bridge has been found from
+	// the business side months later ("Hermes does not show Luz's labels")
+	// instead of from a log line.
+	default:
+		a.reportUnhandled(evt)
 	}
+}
+
+// reportUnhandled says that an event type crossed the switch without a case.
+//
+// 🔴 ONLY THE TYPE NAME CROSSES THE BRIDGE. The payload of an unhandled event can
+// carry a contact's name, a phone number or message text, and none of it has a
+// consumer on the other side — the question this answers is "what are we
+// dropping?", which the name alone answers. Forwarding the payload would spill a
+// seller's address book into a log nobody audits.
+//
+// Reported at powers of ten and not on every sighting: a full app-state sync
+// fires thousands of Contact events, and a report per event would flood the same
+// pipe real traffic uses — the report would become the outage. Five lines per
+// type over the life of the process still say whether something happens once or a
+// million times, which is what decides whether it is worth wiring up.
+func (a *App) reportUnhandled(evt interface{}) {
+	name := fmt.Sprintf("%T", evt)
+
+	a.unhandledMu.Lock()
+	if a.unhandled == nil {
+		a.unhandled = make(map[string]int)
+	}
+	a.unhandled[name]++
+	seen := a.unhandled[name]
+	a.unhandledMu.Unlock()
+
+	if !isPowerOfTen(seen) {
+		return
+	}
+	sendEvent("event:unhandled", map[string]interface{}{
+		"type":  name,
+		"count": seen,
+	})
+}
+
+func isPowerOfTen(n int) bool {
+	if n < 1 {
+		return false
+	}
+	for n >= 10 && n%10 == 0 {
+		n /= 10
+	}
+	return n == 1
 }
 
 // ── Serialization helpers ────────────────────────────

@@ -156,6 +156,16 @@ describe("event forwarding", () => {
       expect(seen).toHaveBeenCalledWith(payload);
     });
 
+    it("forwards event:unhandled", () => {
+      const { client, proc } = createTestClient();
+      const seen = vi.fn();
+      client.on("event:unhandled", seen);
+
+      proc.emit("event:unhandled", { type: "*events.Contact", count: 10 });
+
+      expect(seen).toHaveBeenCalledWith({ type: "*events.Contact", count: 10 });
+    });
+
     it("forwards stream_replaced", () => {
       const { client, proc } = createTestClient();
       const seen = vi.fn();

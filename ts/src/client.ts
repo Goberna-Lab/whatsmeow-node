@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { GoProcess } from "./process.js";
 import type {
+  BinaryVersion,
   ClientOptions,
   JID,
   MessageContent,
@@ -77,6 +78,7 @@ export class WhatsmeowClient extends EventEmitter {
     this.proc.on("label:chat", (d) => this.emit("label:chat", d));
     this.proc.on("label:message", (d) => this.emit("label:message", d));
     this.proc.on("identity_change", (d) => this.emit("identity_change", d));
+    this.proc.on("event:unhandled", (d) => this.emit("event:unhandled", d));
     this.proc.on("history_sync", (d) => this.emit("history_sync", d));
     this.proc.on("qr", (d) => this.emit("qr", d));
     this.proc.on("qr:timeout", (d) => this.emit("qr:timeout", d));
@@ -127,6 +129,18 @@ export class WhatsmeowClient extends EventEmitter {
   // Maps to: client.Logout()
   async logout(): Promise<void> {
     await this.proc.send("logout");
+  }
+
+  /**
+   * Who this binary is, and what it can emit.
+   *
+   * Needs no session: it is meant to be asked right after the process starts, to
+   * decide whether this build can do what you are about to depend on. Throws on
+   * a binary that predates the command — which is itself the answer, and the one
+   * a consumer has to handle rather than let pass.
+   */
+  async version(): Promise<BinaryVersion> {
+    return (await this.proc.send("version")) as BinaryVersion;
   }
 
   // Maps to: client.IsConnected()

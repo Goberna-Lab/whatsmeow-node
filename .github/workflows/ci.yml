@@ -14,7 +14,11 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go run ./scripts/check-client-parity
-      - run: go build ./cmd/whatsmeow-node
+      # `-o /dev/null` NO es cosmético: sin él, `go build ./cmd/whatsmeow-node`
+      # escribe ./whatsmeow-node en la raíz y pisa el binario commiteado —el que
+      # se publica y ejecuta VPS1— con uno nativo, dinámico y sin stripear.
+      # Acá sólo interesa que compile.
+      - run: go build -o /dev/null ./cmd/whatsmeow-node
       - run: go vet ./...
       - run: go test ./...
       # El binario de linux-x64 viaja commiteado (README-GOBERNA.md). Esto revisa

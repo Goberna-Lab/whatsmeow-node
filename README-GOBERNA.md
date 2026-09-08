@@ -113,7 +113,7 @@ sola. Es exactamente el «la línea se quedó sorda y el estado seguía diciendo
 En la práctica lo dispara abrir un segundo proceso sobre el mismo archivo de sesión — por ejemplo,
 levantar un cliente propio sobre `.wa-sessions/<numero>.db` de una vendedora para inspeccionarle
 algo mientras el servicio de VPS1 la tiene abierta. **No se hace**: SQLite no admite dos escritores
-y podés desloguearla de su línea de trabajo.
+y puedes desloguearla de su línea de trabajo.
 
 ## Convenciones de forma
 
@@ -175,7 +175,7 @@ cd ts && npm test
 > ⚠️ **`GOARCH=amd64` no es opcional.** En una Mac con Apple Silicon la imagen `golang:1.25` corre
 > nativa en arm64, así que sin esa variable el build produce un binario **ARM** y pisa el de
 > `linux-x64`, que es el que ejecuta VPS1. Nada se queja al commitearlo: falla recién al arrancar en
-> el servidor. Verificá siempre antes de commitear:
+> el servidor. Verifica siempre antes de commitear:
 >
 > ```bash
 > file whatsmeow-node                      # => ELF 64-bit LSB executable, x86-64
@@ -185,7 +185,7 @@ cd ts && npm test
 > La misma trampa la dispara reproducir CI a mano: **`go build ./cmd/whatsmeow-node`, sin `-o`,
 > escribe `./whatsmeow-node`** y pisa el binario commiteado con uno nativo, sin `-trimpath` y sin
 > stripear. En CI eso es inofensivo porque el runner es descartable; en tu checkout no. Si lo
-> corriste, recompilá con el comando de arriba antes de commitear.
+> corriste, recompila con el comando de arriba antes de commitear.
 
 Después se commitean `whatsmeow-node` y `ts/dist/`, y se sube una etiqueta nueva
 (`v0.7.0-goberna.N`) para que Hermes la fije en `server/package.json`. La etiqueta dispara el

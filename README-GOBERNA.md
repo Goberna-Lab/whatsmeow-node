@@ -1,37 +1,31 @@
-# Fork de `whatsmeow-node` — el registro de llamadas
+# Fork de `whatsmeow-node` — los eventos que el puente descartaba
 
 Este repo es un fork de [`nicastelo/whatsmeow-node`](https://github.com/nicastelo/whatsmeow-node)
-(MIT) con **un solo agregado**: exponer al lado JavaScript el **registro de llamadas** que
-WhatsApp le sincroniza a un dispositivo vinculado.
+(MIT) con **un solo tipo de agregado**: exponer al lado JavaScript eventos que llegan completos al
+proceso Go y se descartan antes de cruzar el puente.
 
-Lo consume [Hermes](https://github.com/Goberna-Lab/hermes), el CRM de la Escuela, para su vista
-**Llamadas**.
+Lo consume [Hermes](https://github.com/Goberna-Lab/hermes), el CRM de la Escuela.
 
-## Qué le falta al paquete original
+## Por qué se pierden
 
-El dato llega completo al proceso Go y se descarta en dos lugares de
-`cmd/whatsmeow-node/events.go`:
-
-1. **El historial que empuja el teléfono al vincular.** El evento se reenviaba con el tipo de
-   sincronización y nada más, tirando el contenido:
-
-   ```go
-   case *events.HistorySync:
-       sendEvent("history_sync", map[string]interface{}{
-           "type": v.Data.GetSyncType().String(),   // ← y se descarta v.Data entero
-       })
-   ```
-
-   `v.Data.GetCallLogRecords()` trae el registro de llamadas.
-
-2. **Las llamadas posteriores.** No existía `case *events.AppState:`, así que el
-   `callLogAction` —el parche de app-state con el que WhatsApp va sumando cada llamada nueva—
-   nunca salía del proceso.
+El `switch` de `cmd/whatsmeow-node/events.go` es cerrado y **no tiene `default`**. Un evento sin
+`case` propio no produce error, no se loguea y no sale del proceso: whatsmeow emite unos 74 tipos y
+el wrapper original reenviaba 19. Lo que falta no falla — falta en silencio, que es la razón por la
+que estos huecos se descubren tarde y desde el lado del negocio ("Hermes no muestra las etiquetas
+de Luz"), nunca desde un stack trace.
 
 ## Qué agrega este fork
 
-Un evento nuevo, `call:log`, con **un registro por llamada** y la misma forma venga de donde
-venga (lo distingue el campo `source`):
+### `call:log` — el registro de llamadas
+
+WhatsApp le sincroniza a un dispositivo vinculado su propio registro de llamadas, el de la pestaña
+«Llamadas» del celular, **incluidas las que marcó el dueño de la línea** —que son justo las que no
+tienen evento en vivo—. Ese dato se descartaba en dos lugares: `case *events.HistorySync:` reenviaba
+el tipo de sincronización y tiraba `v.Data` entero (donde vive `GetCallLogRecords()`), y no existía
+`case *events.AppState:`, así que el `callLogAction` con el que WhatsApp va sumando cada llamada
+nueva nunca salía.
+
+Un registro por llamada, con la misma forma venga de donde venga; lo distingue `source`:
 
 ```ts
 cliente.on('call:log', (ll) => {
@@ -44,54 +38,168 @@ cliente.on('call:log', (ll) => {
 })
 ```
 
-Los enums viajan con su **nombre** de protobuf y no como número: así ningún consumidor tiene
-que llevar su propia copia del orden del enum, que es una copia que se pudre en silencio el día
-que WhatsApp inserta un valor en el medio.
+Un registro sin `callId` se descarta: no se puede deduplicar, y guardarlo duplicaría la fila en cada
+resincronización. Una llamada duplicada es peor que una que falta, porque infla los totales sin
+síntoma.
 
-`startTime` va crudo, en segundos: formatearlo del lado Go hornearía la zona horaria de ese
-proceso adentro del dato.
+### `label:edit`, `label:chat`, `label:message` — las etiquetas de WhatsApp Business
 
-Cubierto por `cmd/whatsmeow-node/events_calllog_test.go`.
+Las etiquetas que una vendedora le pone a sus chats y mensajes desde el celular. Viajan por *app
+state* y whatsmeow ya las emitía como tres eventos tipados; el `switch` no tenía `case` para
+ninguno.
+
+```ts
+cliente.on('label:edit', (e) => {
+  e.labelId       // la llave
+  e.name          // el nombre que le puso la vendedora
+  e.color         // índice de la paleta de WhatsApp, no un color CSS
+  e.deleted       // true = la borró; el evento NO deja de llegar, llega con el flag
+  e.timestamp     // segundos desde el epoch, sin formatear
+  e.fromFullSync  // true = viene de la tanda que WhatsApp reenvía al resincronizar
+})
+
+cliente.on('label:chat', (e) => {
+  e.jid           // el chat etiquetado
+  e.labelId
+  e.labeled       // true = se la puso | false = se la sacó
+  e.timestamp
+  e.fromFullSync
+})
+
+cliente.on('label:message', (e) => {
+  e.jid           // el chat donde vive el mensaje
+  e.messageId     // el mensaje etiquetado
+  e.labelId
+  e.labeled
+  e.timestamp
+  e.fromFullSync
+})
+```
+
+**`fromFullSync` hace acá el trabajo que hace `source` en `call:log`**: una resincronización de 700
+etiquetas que ya existían no son 700 ediciones nuevas, y un consumidor que las trate igual va a
+duplicar todo el historial.
+
+Un evento de etiqueta **sin acción se descarta**, igual que una llamada sin `callId`. El motivo es
+peor que el de la llamada: en una asociación, la acción ausente hace que `labeled` lea `false`, que
+es indistinguible de un desetiquetado deliberado. Perder un evento se recupera en la próxima
+sincronización; desetiquetar en silencio los 700 contactos de una vendedora, no.
+
+> ⚠️ **Trampa al mantener esto.** whatsmeow despacha `events.AppState` **además** del evento tipado,
+> para la misma mutación (`appstate.go`: primero agrega el `AppState`, después el que devuelve
+> `dispatchAppState`). Como el `case *events.AppState:` ya existe para el registro de llamadas, es
+> tentador colgar ahí las etiquetas con `GetLabelEditAction()` y ahorrarse tres casos. **No**: cada
+> cambio saldría dos veces. Y el evento tipado es además la mejor fuente, porque trae el `labelId`,
+> el `jid` y el `messageId` ya parseados del índice de la mutación, y se despacha también en los
+> borrados, que el `AppState` crudo no. Hay un test que se pone en rojo si alguien hace el atajo.
+
+### `message:undecryptable` — los mensajes que no se pudieron descifrar
+
+whatsmeow le pide al emisor que reintente por su cuenta; si funciona, después llega un `message`
+normal con el mismo `info.id`. Si no funciona, este evento es **el único rastro** de que a la
+conversación le falta un turno. Antes desaparecían sin dejar señal, que es un agujero en el dato y
+no una molestia.
+
+`unavailableType` y `decryptFailMode` viajan tal cual los reporta whatsmeow, **cadena vacía
+incluida**: arriba el `""` es un valor y no una ausencia (`""` en `decryptFailMode` significa que el
+mensaje igual se muestra; `"hide"`, que no).
+
+### `stream_replaced` — otro cliente tomó la sesión
+
+Otro cliente se conectó con las mismas llaves y se quedó con el socket. La conexión ya no vuelve
+sola. Es exactamente el «la línea se quedó sorda y el estado seguía diciendo conectado» del **ADR
+0073** de Hermes, que se resolvió con un ping activo *porque no había señal*. Esta es la señal.
+
+En la práctica lo dispara abrir un segundo proceso sobre el mismo archivo de sesión — por ejemplo,
+levantar un cliente propio sobre `.wa-sessions/<numero>.db` de una vendedora para inspeccionarle
+algo mientras el servicio de VPS1 la tiene abierta. **No se hace**: SQLite no admite dos escritores
+y podés desloguearla de su línea de trabajo.
+
+## Convenciones de forma
+
+Valen para todo lo que agregue este fork:
+
+- **Los enums viajan con su NOMBRE de protobuf**, no como número. Con números, cada consumidor
+  tendría que llevar su propia copia del orden del enum — una copia que se pudre en silencio el día
+  que WhatsApp inserta un valor en el medio.
+- **Los timestamps van crudos, en segundos desde el epoch.** Formatearlos del lado Go hornearía la
+  zona horaria de *ese* proceso adentro del dato.
+- **Lo que no se puede identificar se descarta**, y el descarte está comentado y testeado. Un
+  registro sin llave no se puede deduplicar ni corregir después; entra una vez por cada
+  resincronización.
+
+Cubierto por `cmd/whatsmeow-node/events_calllog_test.go`, `events_labels_test.go` y
+`events_integrity_test.go` del lado Go, y `ts/src/__tests__/client-events.test.ts` del lado
+TypeScript. Los tests de Go van contra `eventHandler` entero y por el `sendEvent` real, así que
+verifican el JSON que efectivamente cruza el puente, no una struct de Go.
 
 ## Lo que cambia respecto del original, para poder instalarlo desde git
 
-El paquete npm del proyecto vive en `ts/`, así que el repo **no tenía `package.json` en la
-raíz** y una dependencia de git no resolvía. Este fork agrega:
+El paquete npm del proyecto vive en `ts/`, así que el repo **no tenía `package.json` en la raíz** y
+una dependencia de git no resolvía. Este fork agrega:
 
 - **`package.json` en la raíz**, que apunta a `ts/dist/`.
 - **`ts/dist/` y el binario `whatsmeow-node` de la raíz commiteados** (el original los ignora,
-  porque los arma en cada release). Acá tienen que viajar, porque `npm ci` en el VPS no compila
-  Go ni TypeScript.
+  porque los arma en cada release). Acá tienen que viajar, porque `npm ci` en el VPS no compila Go
+  ni TypeScript.
 
-El binario de la raíz es justo la ruta que `resolveBinary()` mira **primero**, así que se
-encuentra solo: no hace falta `binaryPath` ni variable de entorno.
+El binario de la raíz es justo la ruta que `resolveBinary()` mira **primero**, así que se encuentra
+solo: no hace falta `binaryPath` ni variable de entorno.
 
-> ⚠️ **Sólo se publica el binario de `linux-x64`**, que es lo que corre el servidor. Este fork
-> **no** declara las `optionalDependencies` de plataforma del original, y es a propósito: si las
-> declarara, en otra plataforma npm bajaría el binario **de upstream** —el que no tiene este
-> parche— y `call:log` no se emitiría **nunca, sin un solo error**. Es preferible que falle
-> ruidosamente a que falte una capacidad en silencio.
+> ⚠️ **Sólo se publica el binario de `linux-x64`**, que es lo que corre el servidor. Este fork **no**
+> declara las `optionalDependencies` de plataforma del original, y es a propósito: si las declarara,
+> en otra plataforma npm bajaría el binario **de upstream** —el que no tiene estos parches— y los
+> eventos no se emitirían **nunca, sin un solo error**. Es preferible que falle ruidosamente a que
+> falte una capacidad en silencio.
+>
+> Corolario: el binario que hay en `node_modules/@whatsmeow-node/darwin-arm64/` de un proyecto que
+> consume el fork **es el de upstream**, no el de acá. Analizarlo da conclusiones falsas.
 
 ## Cómo se reconstruye
 
 ```bash
 # El binario (no hace falta tener Go instalado)
-docker run --rm -v "$PWD":/src -v "$PWD/.gocache":/go/pkg/mod -w /src -e CGO_ENABLED=0 \
+docker run --rm -v "$PWD":/src -v "$PWD/.gocache":/go/pkg/mod -w /src \
+  -e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 \
   golang:1.25 go build -buildvcs=false -trimpath -ldflags=-s -o /src/whatsmeow-node ./cmd/whatsmeow-node
 
 # El paquete JS
 cd ts && npm install && npm run build
 
 # Las pruebas
-docker run --rm -v "$PWD":/src -w /src golang:1.25 go test -buildvcs=false ./...
+docker run --rm -v "$PWD":/src -v "$PWD/.gocache":/go/pkg/mod -w /src golang:1.25 \
+  go test -buildvcs=false ./...
 cd ts && npm test
 ```
 
+> ⚠️ **`GOARCH=amd64` no es opcional.** En una Mac con Apple Silicon la imagen `golang:1.25` corre
+> nativa en arm64, así que sin esa variable el build produce un binario **ARM** y pisa el de
+> `linux-x64`, que es el que ejecuta VPS1. Nada se queja al commitearlo: falla recién al arrancar en
+> el servidor. Verificá siempre antes de commitear:
+>
+> ```bash
+> file whatsmeow-node                      # => ELF 64-bit LSB executable, x86-64
+> strings -a whatsmeow-node | grep -c 'label:edit'   # => 1, el evento está adentro
+> ```
+>
+> La misma trampa la dispara reproducir CI a mano: **`go build ./cmd/whatsmeow-node`, sin `-o`,
+> escribe `./whatsmeow-node`** y pisa el binario commiteado con uno nativo, sin `-trimpath` y sin
+> stripear. En CI eso es inofensivo porque el runner es descartable; en tu checkout no. Si lo
+> corriste, recompilá con el comando de arriba antes de commitear.
+
 Después se commitean `whatsmeow-node` y `ts/dist/`, y se sube una etiqueta nueva
-(`v0.7.0-goberna.N`) para que Hermes la fije.
+(`v0.7.0-goberna.N`) para que Hermes la fije en `server/package.json`. La etiqueta dispara el
+workflow **Release**, que arma los binarios de todas las plataformas, intenta publicar a npm (falla
+sin ruido: el scope `@whatsmeow-node` es de upstream), crea el GitHub Release y **pushea a `main` un
+commit de sync de versiones**.
 
 ## Al día con upstream
 
-El agregado es chico y está aislado en `events.go`, así que traer una versión nueva de upstream
-es `git merge` de su tag y volver a compilar. **El destino de esto es un PR a upstream**: el
-hueco es de ellos, no de Goberna, y si lo aceptan este fork se puede tirar.
+`Goberna-Lab/whatsmeow-node` **no es un fork de GitHub** (`fork: false`, `parent: null`): es una
+copia con la historia de upstream adentro. No hay «compare across forks» ni PR automático hacia
+`nicastelo/whatsmeow-node` — traer una actualización de upstream es agregar el remoto y mergear a
+mano.
+
+El agregado es chico y está aislado en `events.go`, así que traer una versión nueva de upstream es
+`git merge` de su tag y volver a compilar. **El destino de esto es un PR a upstream**: el hueco es
+de ellos, no de Goberna, y si lo aceptan este fork se puede tirar.

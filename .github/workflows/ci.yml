@@ -17,6 +17,10 @@ jobs:
       - run: go build ./cmd/whatsmeow-node
       - run: go vet ./...
       - run: go test ./...
+      # El binario de linux-x64 viaja commiteado (README-GOBERNA.md). Esto revisa
+      # que sea de ESTE commit y de la arquitectura correcta: las dos formas de
+      # romperlo no se notan hasta que arranca en VPS1.
+      - run: ./scripts/check-committed-binary.sh
 
   build-ts:
     runs-on: ubuntu-latest

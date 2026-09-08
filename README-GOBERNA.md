@@ -115,6 +115,58 @@ levantar un cliente propio sobre `.wa-sessions/<numero>.db` de una vendedora par
 algo mientras el servicio de VPS1 la tiene abierta. **No se hace**: SQLite no admite dos escritores
 y puedes desloguearla de su línea de trabajo.
 
+### `version` — quién es este binario
+
+**El fallo que esto tapa es total y silencioso.** Este fork agrega eventos que upstream no tiene; con
+el binario de upstream instalado esos eventos no se emiten **nunca**, todas las suscripciones quedan
+mudas y nadie levanta un error. Un consumidor no puede distinguir «no pasó nada» de «este binario no
+me puede avisar cuando pasa».
+
+El binario expone 106 comandos IPC y hasta ahora ninguno decía qué build era. Ahora se pregunta:
+
+```ts
+const quien = await cliente.version()
+quien.fork       // 'goberna' — cualquier otra cosa es un binario SIN estos eventos
+quien.version    // '0.7.0-goberna.4'
+quien.whatsmeow  // contra qué whatsmeow se enlazó, leído del build info
+quien.events     // los 29 nombres de evento que este binario puede emitir
+```
+
+`events` es la lista que un consumidor compara contra lo que escucha, para poder decir en voz alta
+«este binario no hace lo que necesito» en vez de quedarse esperando. Se pregunta **antes de `init`**:
+no necesita sesión.
+
+> ⚠️ **Una lista declarada que se desfasa es peor que no tener lista**, porque el consumidor le cree.
+> `eventNames` se verifica contra cada `sendEvent("…")` del código, en los dos sentidos: un nombre que
+> se emite y no está declarado haría que el handshake niegue una capacidad que el binario tiene, y uno
+> declarado que nadie emite dejaría a un consumidor esperando para siempre. Es el mismo candado que
+> `scripts/client-parity.json` ya le pone a los 133 métodos del cliente, aplicado a los eventos.
+
+### `event:unhandled` — qué estamos tirando
+
+El `switch` ahora tiene `default`. Un tipo de evento sin `case` propio ya no desaparece: se reporta
+con **su nombre de tipo de Go y nada más**.
+
+```ts
+cliente.on('event:unhandled', (e) => {
+  e.type   // '*events.Contact'
+  e.count  // 1, 10, 100… (ver abajo)
+})
+```
+
+🔴 **Sólo cruza el nombre del tipo.** El payload de un evento no manejado puede traer el nombre de un
+contacto, un teléfono o el texto de un mensaje, y nada de eso tiene consumidor del otro lado: la
+pregunta que este evento contesta es «¿qué estamos tirando?», y el nombre solo la contesta. Reenviar
+el payload derramaría la agenda de una vendedora en un log que nadie audita.
+
+Se reporta en **potencias de diez**, no en cada aparición: una sincronización completa de app state
+dispara miles de `Contact`, y un reporte por evento inundaría el mismo pipe que usa el tráfico real —
+el reporte sería la caída. Cinco líneas por tipo en toda la vida del proceso igual dicen si algo pasa
+una vez o un millón, que es lo que decide si vale la pena cablearlo.
+
+Con esto, «qué nos estamos perdiendo» pasa a ser una consulta y no una investigación de meses. De los
+~70 tipos que declara whatsmeow, el `switch` cubre 25.
+
 ## Convenciones de forma
 
 Valen para todo lo que agregue este fork:
@@ -128,10 +180,11 @@ Valen para todo lo que agregue este fork:
   registro sin llave no se puede deduplicar ni corregir después; entra una vez por cada
   resincronización.
 
-Cubierto por `cmd/whatsmeow-node/events_calllog_test.go`, `events_labels_test.go` y
-`events_integrity_test.go` del lado Go, y `ts/src/__tests__/client-events.test.ts` del lado
-TypeScript. Los tests de Go van contra `eventHandler` entero y por el `sendEvent` real, así que
-verifican el JSON que efectivamente cruza el puente, no una struct de Go.
+Cubierto por `cmd/whatsmeow-node/events_calllog_test.go`, `events_labels_test.go`,
+`events_integrity_test.go`, `events_unhandled_test.go` y `capabilities_test.go` del lado Go, y
+`ts/src/__tests__/client-events.test.ts` del lado TypeScript. Los tests de Go van contra
+`eventHandler` entero y por el `sendEvent` real, así que verifican el JSON que efectivamente cruza el
+puente, no una struct de Go.
 
 ## Lo que cambia respecto del original, para poder instalarlo desde git
 
@@ -186,6 +239,22 @@ cd ts && npm test
 > escribe `./whatsmeow-node`** y pisa el binario commiteado con uno nativo, sin `-trimpath` y sin
 > stripear. En CI eso es inofensivo porque el runner es descartable; en tu checkout no. Si lo
 > corriste, recompila con el comando de arriba antes de commitear.
+
+### El chequeo que corre CI sobre el binario commiteado
+
+`scripts/check-committed-binary.sh` revisa que el archivo que viaja en el repo sea **de este commit y
+de la arquitectura correcta**: que sea `x86-64`, que esté enlazado estáticamente, que contenga la
+`forkVersion` del código y que traiga los 29 eventos que `eventNames` promete. Corre solo en CI, y
+conviene correrlo a mano antes de commitear:
+
+```bash
+./scripts/check-committed-binary.sh
+```
+
+Existe porque publicar el binario dentro del repo convierte un problema de build en un problema de
+contenido: el archivo puede quedar viejo o de otra arquitectura, el commit sale limpio igual, y no se
+nota hasta que arranca en el servidor. Las dos formas de romperlo están descritas arriba y las dos
+pasaron el mismo día.
 
 Después se commitean `whatsmeow-node` y `ts/dist/`, y se sube una etiqueta nueva
 (`v0.7.0-goberna.N`) para que Hermes la fije en `server/package.json`. La etiqueta dispara el

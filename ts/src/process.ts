@@ -87,20 +87,44 @@ export class GoProcess extends EventEmitter {
     });
   }
 
+  /**
+   * Kill the Go subprocess: SIGTERM first, SIGKILL if it is still alive after
+   * five seconds.
+   *
+   * 🔴 THE ESCALATION HAS TO HOLD ITS OWN REFERENCE. It used to read
+   * `this.proc?.kill("SIGKILL")` inside the timer while `this.proc = null` ran
+   * synchronously just below — so five seconds later the optional chain
+   * short-circuited on null and **SIGKILL was never sent**. A subprocess that
+   * did not die on SIGTERM was then orphaned twice over: still running, and no
+   * longer reachable, because every later `kill()` returns at the `!proc` guard.
+   *
+   * That is not theoretical. Measured in production on 9-sep-2026: 59 live Go
+   * processes for 5 sessions, up to 20 of them holding the same SQLite session
+   * file open — the one thing this store must never have — leaking a fresh
+   * generation every four minutes and never losing one.
+   */
   kill(): void {
-    if (!this.proc) return;
+    const proc = this.proc;
+    if (!proc) return;
 
     if (this.cleanupHandler) {
       process.removeListener("exit", this.cleanupHandler);
       this.cleanupHandler = null;
     }
 
+    // Dropped before the signals on purpose: from here on this class does not
+    // own the process, and a caller that kills twice must not signal it twice.
+    this.proc = null;
+
     try {
-      this.proc.kill("SIGTERM");
-      // Force kill after 5 seconds
+      proc.kill("SIGTERM");
       const forceTimer = setTimeout(() => {
+        // Only if it is really still there. A process that exited cleanly has
+        // one of these set, and signalling a reaped pid could hit a new process
+        // that inherited it.
+        if (proc.exitCode !== null || proc.signalCode !== null) return;
         try {
-          this.proc?.kill("SIGKILL");
+          proc.kill("SIGKILL");
         } catch (_) {
           /* process already dead */
         }
@@ -109,7 +133,6 @@ export class GoProcess extends EventEmitter {
     } catch (_) {
       /* process already dead */
     }
-    this.proc = null;
   }
 
   get alive(): boolean {

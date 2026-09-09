@@ -118,24 +118,42 @@ var GoProcess = class extends import_node_events.EventEmitter {
       if (stdin) stdin.write(JSON.stringify(command) + "\n");
     });
   }
+  /**
+   * Kill the Go subprocess: SIGTERM first, SIGKILL if it is still alive after
+   * five seconds.
+   *
+   * 🔴 THE ESCALATION HAS TO HOLD ITS OWN REFERENCE. It used to read
+   * `this.proc?.kill("SIGKILL")` inside the timer while `this.proc = null` ran
+   * synchronously just below — so five seconds later the optional chain
+   * short-circuited on null and **SIGKILL was never sent**. A subprocess that
+   * did not die on SIGTERM was then orphaned twice over: still running, and no
+   * longer reachable, because every later `kill()` returns at the `!proc` guard.
+   *
+   * That is not theoretical. Measured in production on 9-sep-2026: 59 live Go
+   * processes for 5 sessions, up to 20 of them holding the same SQLite session
+   * file open — the one thing this store must never have — leaking a fresh
+   * generation every four minutes and never losing one.
+   */
   kill() {
-    if (!this.proc) return;
+    const proc = this.proc;
+    if (!proc) return;
     if (this.cleanupHandler) {
       process.removeListener("exit", this.cleanupHandler);
       this.cleanupHandler = null;
     }
+    this.proc = null;
     try {
-      this.proc.kill("SIGTERM");
+      proc.kill("SIGTERM");
       const forceTimer = setTimeout(() => {
+        if (proc.exitCode !== null || proc.signalCode !== null) return;
         try {
-          this.proc?.kill("SIGKILL");
+          proc.kill("SIGKILL");
         } catch (_) {
         }
       }, 5e3);
       forceTimer.unref();
     } catch (_) {
     }
-    this.proc = null;
   }
   get alive() {
     return this.proc !== null && !this.proc.killed;

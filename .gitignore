@@ -16,6 +16,9 @@ ts/coverage/
 # Platform packages (populated at release time)
 npm/*/bin/
 
+# GOBERNA: cache de modulos Go que monta el build con Docker del README.
+.gocache/
+
 # Environment
 .env
 

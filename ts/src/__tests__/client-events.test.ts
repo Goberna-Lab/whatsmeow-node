@@ -156,6 +156,21 @@ describe("event forwarding", () => {
       expect(seen).toHaveBeenCalledWith(payload);
     });
 
+    it("forwards event:panic", () => {
+      const { client, proc } = createTestClient();
+      const seen = vi.fn();
+      client.on("event:panic", seen);
+
+      const payload = {
+        where: "event *events.Message",
+        error: "runtime error: invalid memory address",
+        stack: "goroutine 1 [running]:\nmain.serializeMessageInfo(...)",
+      };
+      proc.emit("event:panic", payload);
+
+      expect(seen).toHaveBeenCalledWith(payload);
+    });
+
     it("forwards event:unhandled", () => {
       const { client, proc } = createTestClient();
       const seen = vi.fn();

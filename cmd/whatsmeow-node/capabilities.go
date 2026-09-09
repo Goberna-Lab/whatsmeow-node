@@ -45,6 +45,7 @@ var eventNames = []string{
 	"chat_presence",
 	"connected",
 	"disconnected",
+	"event:panic",
 	"event:unhandled",
 	"group:info",
 	"group:joined",

@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -55,14 +56,38 @@ func TestVersionEventListMatchesEverySendEventInTheSource(t *testing.T) {
 	enElCodigo := map[string]bool{}
 	patron := regexp.MustCompile(`sendEvent\("([^"]+)"`)
 
-	for _, archivo := range []string{"events.go", "commands.go"} {
+	// 🔴 SE MIRA TODO EL PAQUETE, NO UNA LISTA DE ARCHIVOS. La primera versión de
+	// este test nombraba events.go y commands.go, y un archivo nuevo con un
+	// `sendEvent` se le escapaba entero — que es exactamente el defecto contra el
+	// que existe. Pasó con panic.go la primera vez que hubo uno.
+	fuentes, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("no se pudo listar el paquete: %v", err)
+	}
+	revisados := 0
+	for _, archivo := range fuentes {
+		if strings.HasSuffix(archivo, "_test.go") {
+			continue
+		}
 		fuente, err := os.ReadFile(archivo)
 		if err != nil {
 			t.Fatalf("no se pudo leer %s: %v", archivo, err)
 		}
-		for _, m := range patron.FindAllStringSubmatch(string(fuente), -1) {
-			enElCodigo[m[1]] = true
+		revisados++
+		// Sin los comentarios: este mismo archivo documenta el patrón escribiendo
+		// una llamada de ejemplo, y contarla haría que el test reclame un evento
+		// que no existe.
+		for _, linea := range strings.Split(string(fuente), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(linea), "//") {
+				continue
+			}
+			for _, m := range patron.FindAllStringSubmatch(linea, -1) {
+				enElCodigo[m[1]] = true
+			}
 		}
+	}
+	if revisados == 0 {
+		t.Fatal("no se leyó ningún archivo del paquete: el glob no está haciendo nada")
 	}
 
 	declarados := map[string]bool{}

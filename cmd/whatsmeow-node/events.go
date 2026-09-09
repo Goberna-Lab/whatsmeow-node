@@ -11,6 +11,11 @@ import (
 
 // eventHandler is registered on the whatsmeow client to forward events as JSON.
 func (a *App) eventHandler(evt interface{}) {
+	// Corre en las goroutines de whatsmeow: un pánico acá mataba el proceso
+	// entero, y un mensaje que lo dispare siempre deja la línea en bucle. Ver
+	// panic.go.
+	defer a.recoverPanic(fmt.Sprintf("event %T", evt), "")
+
 	switch v := evt.(type) {
 
 	// ── Connection ─────────────────────────────────

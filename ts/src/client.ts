@@ -195,7 +195,9 @@ export class WhatsmeowClient extends EventEmitter {
     fileEncSha256: number[];
     mediaType?: string;
   }): Promise<string> {
-    const result = (await this.proc.send("downloadMedia", msg)) as { path: string };
+    const result = (await this.proc.send("downloadMedia", msg, TIMEOUT_DESCARGA_MS)) as {
+      path: string;
+    };
     return result.path;
   }
 
@@ -615,7 +617,9 @@ export class WhatsmeowClient extends EventEmitter {
   // ── Download Any ──────────────────────────────
 
   async downloadAny(message: Record<string, unknown>): Promise<string> {
-    const result = (await this.proc.send("downloadAny", { message })) as { path: string };
+    const result = (await this.proc.send("downloadAny", { message }, TIMEOUT_DESCARGA_MS)) as {
+      path: string;
+    };
     return result.path;
   }
 
@@ -696,10 +700,14 @@ export class WhatsmeowClient extends EventEmitter {
     mediaType: MediaType;
     mmsType?: string;
   }): Promise<string> {
-    const result = (await this.proc.send("downloadMediaWithPath", {
-      ...opts,
-      mmsType: opts.mmsType ?? "",
-    })) as { path: string };
+    const result = (await this.proc.send(
+      "downloadMediaWithPath",
+      {
+        ...opts,
+        mmsType: opts.mmsType ?? "",
+      },
+      TIMEOUT_DESCARGA_MS,
+    )) as { path: string };
     return result.path;
   }
 
@@ -825,6 +833,15 @@ function normalizeStore(store: string): string {
 }
 
 const BINARY_NAME = process.platform === "win32" ? "whatsmeow-node.exe" : "whatsmeow-node";
+
+/**
+ * Bajar un adjunto grande no se parece a ningún otro comando: la descarga la hace
+ * WhatsApp y el tamaño lo pone quien envió. Con el límite general, un video en una
+ * red lenta se rechaza acá mientras el proceso de Go termina igual y deja su
+ * archivo temporal sin dueño — y el mensaje pierde su adjunto, porque no hay
+ * reintento.
+ */
+const TIMEOUT_DESCARGA_MS = 120_000;
 
 function resolveBinary(): string {
   const thisDir = dirname(fileURLToPath(import.meta.url));

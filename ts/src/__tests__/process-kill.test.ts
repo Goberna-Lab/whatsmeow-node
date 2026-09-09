@@ -114,3 +114,105 @@ describe("GoProcess.kill", () => {
     expect(() => go.kill()).not.toThrow();
   });
 });
+
+/**
+ * QUE MATAR SEA VERIFICABLE, NO SOLO INTENTADO.
+ *
+ * Hasta el 9-sep-2026 nadie comprobaba que el proceso hubiera muerto: se mandaba
+ * la señal y se seguía. Por eso una fuga de 59 procesos vivos se descubrió con
+ * `ps` en producción y no con un log. Un proceso que sobrevive a SIGKILL es raro
+ * —hace falta que esté en espera ininterrumpible— pero si pasa tiene que
+ * decirlo, porque tiene abierto el SQLite de una sesión.
+ */
+describe("GoProcess.kill: verificación", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    spawnFalso.mockReset();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("avisa si el proceso sobrevivió al SIGKILL", () => {
+    const { go } = arrancar();
+    const visto = vi.fn();
+    go.on("log", visto);
+
+    go.kill();
+    vi.advanceTimersByTime(5000); // SIGKILL
+    expect(visto).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(2000); // la comprobación
+
+    expect(visto).toHaveBeenCalledWith(
+      expect.objectContaining({ level: "error", msg: expect.stringContaining("SIGKILL") }),
+    );
+  });
+
+  it("no avisa nada cuando el SIGKILL funcionó", () => {
+    const { go, proc } = arrancar();
+    const visto = vi.fn();
+    go.on("log", visto);
+
+    go.kill();
+    vi.advanceTimersByTime(5000);
+    proc.signalCode = "SIGKILL"; // murió, como corresponde
+    vi.advanceTimersByTime(2000);
+
+    expect(visto).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * UN TIMEOUT POR COMANDO.
+ *
+ * Los 30 s eran uno solo para los 106 comandos: `isConnected` —el ping del
+ * vigilante, que tiene que ser rápido para distinguir «no contesta» de «tarda»—
+ * compartía número con `downloadMedia` de un video de 16 MB.
+ *
+ * Cuando la descarga se pasaba, el lado Node rechazaba con TimeoutError pero el
+ * Go seguía: terminaba, escribía el archivo temporal, y nadie lo recogía. El
+ * mensaje perdía su adjunto para siempre, porque no hay reintento.
+ */
+describe("GoProcess.send: timeout por comando", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    spawnFalso.mockReset();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("usa el timeout de siempre cuando no se pide otro", async () => {
+    const { go } = arrancar();
+    let asentado = false;
+    const capturado = go.send("isConnected").catch((e: Error) => {
+      asentado = true;
+      return e;
+    });
+
+    // `...Async` vacía las microtareas, así que `asentado` es de fiar.
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(asentado).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(asentado).toBe(true);
+    expect(((await capturado) as Error).constructor.name).toBe("TimeoutError");
+  });
+
+  it("respeta un timeout más largo para el comando que lo pide", async () => {
+    const { go } = arrancar();
+    let asentado = false;
+    const capturado = go.send("downloadMedia", {}, 120_000).catch((e: Error) => {
+      asentado = true;
+      return e;
+    });
+
+    // 🔴 Acá está el candado: con el timeout global ya habría fallado.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(asentado).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(((await capturado) as Error).constructor.name).toBe("TimeoutError");
+  });
+});

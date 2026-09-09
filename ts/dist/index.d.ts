@@ -454,6 +454,23 @@ interface WhatsmeowEvents {
      * full app-state sync fires thousands of `*events.Contact`, and a report per
      * event would flood the same pipe real traffic uses.
      */
+    /**
+     * El proceso de Go se recuperó de un pánico y sigue vivo.
+     *
+     * Antes esto no existía porque un pánico mataba el proceso entero: la sesión
+     * se caía, todo lo pendiente se rechazaba y la vendedora dejaba de recibir. Y
+     * si el pánico era determinista —un mensaje que siempre lo dispara— la línea
+     * quedaba en un bucle de reinicio indistinguible de una caída de red.
+     *
+     * Ahora se pierde un evento en vez de una sesión, y queda dicho. **Recibir
+     * esto es un bug del puente, no un problema de red**: `where` dice qué se
+     * estaba haciendo y `stack` dónde reventó.
+     */
+    "event:panic": {
+        where: string;
+        error: string;
+        stack: string;
+    };
     "event:unhandled": {
         type: string;
         count: number;

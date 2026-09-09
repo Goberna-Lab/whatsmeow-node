@@ -78,6 +78,7 @@ export class WhatsmeowClient extends EventEmitter {
     this.proc.on("label:chat", (d) => this.emit("label:chat", d));
     this.proc.on("label:message", (d) => this.emit("label:message", d));
     this.proc.on("identity_change", (d) => this.emit("identity_change", d));
+    this.proc.on("event:panic", (d) => this.emit("event:panic", d));
     this.proc.on("event:unhandled", (d) => this.emit("event:unhandled", d));
     this.proc.on("history_sync", (d) => this.emit("history_sync", d));
     this.proc.on("qr", (d) => this.emit("qr", d));

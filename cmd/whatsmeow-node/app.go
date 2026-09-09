@@ -42,6 +42,9 @@ func (a *App) shutdown() {
 }
 
 func (a *App) handleCommand(cmd Command) {
+	// Un pánico acá mataba el proceso entero y con él la sesión. Ver panic.go.
+	defer a.recoverPanic("command "+cmd.Cmd, cmd.ID)
+
 	switch cmd.Cmd {
 	// Connection & Auth
 	// Who this binary is. Answered without a session on purpose: a consumer asks

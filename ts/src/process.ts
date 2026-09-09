@@ -67,7 +67,21 @@ export class GoProcess extends EventEmitter {
     process.on("exit", this.cleanupHandler);
   }
 
-  async send(cmd: string, args: Record<string, unknown> = {}): Promise<unknown> {
+  /**
+   * `timeoutMs` overrides the process-wide default for this one command.
+   *
+   * One number for all 106 commands meant `isConnected` — the watchdog's ping,
+   * which has to be quick so "no answer" stays distinguishable from "slow" —
+   * shared its limit with downloading a 16 MB video. When the download ran over,
+   * the Node side rejected with TimeoutError while the Go side kept going: it
+   * finished, wrote its temp file, and nobody collected it. The message lost its
+   * attachment for good, because nothing retries.
+   */
+  async send(
+    cmd: string,
+    args: Record<string, unknown> = {},
+    timeoutMs: number = this.commandTimeout,
+  ): Promise<unknown> {
     if (!this.proc?.stdin?.writable) {
       throw new ProcessExitedError(null);
     }
@@ -79,7 +93,7 @@ export class GoProcess extends EventEmitter {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new TimeoutError(id));
-      }, this.commandTimeout);
+      }, timeoutMs);
 
       this.pending.set(id, { resolve, reject, timer });
       const stdin = this.proc?.stdin;
@@ -128,6 +142,21 @@ export class GoProcess extends EventEmitter {
         } catch (_) {
           /* process already dead */
         }
+
+        // 🔴 KILLING HAS TO BE VERIFIABLE, NOT JUST ATTEMPTED. Nothing used to
+        // check that the process was actually gone — which is why a leak of 59
+        // live processes was found with `ps` in production instead of in a log.
+        // Surviving SIGKILL is rare (it takes uninterruptible sleep) but if it
+        // happens it must say so: that process still holds a session store open.
+        const verifyTimer = setTimeout(() => {
+          if (proc.exitCode !== null || proc.signalCode !== null) return;
+          this.emit("log", {
+            level: "error",
+            msg: `whatsmeow subprocess survived SIGKILL (pid ${proc.pid}) — it still holds the session store open`,
+            pid: proc.pid,
+          });
+        }, 2000);
+        verifyTimer.unref();
       }, 5000);
       forceTimer.unref();
     } catch (_) {

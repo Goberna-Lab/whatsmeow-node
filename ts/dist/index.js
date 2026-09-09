@@ -68,7 +68,17 @@ var GoProcess = class extends EventEmitter {
     this.cleanupHandler = () => this.kill();
     process.on("exit", this.cleanupHandler);
   }
-  async send(cmd, args = {}) {
+  /**
+   * `timeoutMs` overrides the process-wide default for this one command.
+   *
+   * One number for all 106 commands meant `isConnected` — the watchdog's ping,
+   * which has to be quick so "no answer" stays distinguishable from "slow" —
+   * shared its limit with downloading a 16 MB video. When the download ran over,
+   * the Node side rejected with TimeoutError while the Go side kept going: it
+   * finished, wrote its temp file, and nobody collected it. The message lost its
+   * attachment for good, because nothing retries.
+   */
+  async send(cmd, args = {}, timeoutMs = this.commandTimeout) {
     if (!this.proc?.stdin?.writable) {
       throw new ProcessExitedError(null);
     }
@@ -78,7 +88,7 @@ var GoProcess = class extends EventEmitter {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new TimeoutError(id));
-      }, this.commandTimeout);
+      }, timeoutMs);
       this.pending.set(id, { resolve: resolve2, reject, timer });
       const stdin = this.proc?.stdin;
       if (stdin) stdin.write(JSON.stringify(command) + "\n");
@@ -116,6 +126,15 @@ var GoProcess = class extends EventEmitter {
           proc.kill("SIGKILL");
         } catch (_) {
         }
+        const verifyTimer = setTimeout(() => {
+          if (proc.exitCode !== null || proc.signalCode !== null) return;
+          this.emit("log", {
+            level: "error",
+            msg: `whatsmeow subprocess survived SIGKILL (pid ${proc.pid}) \u2014 it still holds the session store open`,
+            pid: proc.pid
+          });
+        }, 2e3);
+        verifyTimer.unref();
       }, 5e3);
       forceTimer.unref();
     } catch (_) {
@@ -270,7 +289,7 @@ var WhatsmeowClient = class extends EventEmitter2 {
   }
   // ── Media ────────────────────────────────────────
   async downloadMedia(msg) {
-    const result = await this.proc.send("downloadMedia", msg);
+    const result = await this.proc.send("downloadMedia", msg, TIMEOUT_DESCARGA_MS);
     return result.path;
   }
   // ── Contacts & Users ─────────────────────────────
@@ -550,7 +569,7 @@ var WhatsmeowClient = class extends EventEmitter2 {
   }
   // ── Download Any ──────────────────────────────
   async downloadAny(message) {
-    const result = await this.proc.send("downloadAny", { message });
+    const result = await this.proc.send("downloadAny", { message }, TIMEOUT_DESCARGA_MS);
     return result.path;
   }
   // ── Connection Internals ────────────────────────
@@ -596,10 +615,14 @@ var WhatsmeowClient = class extends EventEmitter2 {
   }
   // ── Download Variants ─────────────────────────
   async downloadMediaWithPath(opts) {
-    const result = await this.proc.send("downloadMediaWithPath", {
-      ...opts,
-      mmsType: opts.mmsType ?? ""
-    });
+    const result = await this.proc.send(
+      "downloadMediaWithPath",
+      {
+        ...opts,
+        mmsType: opts.mmsType ?? ""
+      },
+      TIMEOUT_DESCARGA_MS
+    );
     return result.path;
   }
   async downloadMediaWithOnlyPath(directPath) {
@@ -664,6 +687,7 @@ function normalizeStore(store) {
   return `file:${store}`;
 }
 var BINARY_NAME = process.platform === "win32" ? "whatsmeow-node.exe" : "whatsmeow-node";
+var TIMEOUT_DESCARGA_MS = 12e4;
 function resolveBinary() {
   const thisDir = dirname(fileURLToPath(import.meta.url));
   const localBin = resolve(thisDir, "../../whatsmeow-node");

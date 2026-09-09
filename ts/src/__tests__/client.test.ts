@@ -269,7 +269,10 @@ describe("WhatsmeowClient", () => {
         fileEncSha256: [7, 8, 9],
       };
       const result = await client.downloadMedia(msg);
-      expect(send).toHaveBeenCalledWith("downloadMedia", msg);
+      // 120_000 y no el global: bajar un adjunto grande no se parece a ningún
+      // otro comando, y con el límite de siempre el Go terminaba igual y dejaba
+      // su temporal sin dueño mientras acá ya se había rechazado.
+      expect(send).toHaveBeenCalledWith("downloadMedia", msg, 120_000);
       expect(result).toBe("/tmp/file123");
     });
 
@@ -1003,9 +1006,11 @@ describe("WhatsmeowClient", () => {
     it("downloadAny sends message and returns path", async () => {
       mockResolve(send, { path: "/tmp/whatsmeow-123" });
       const result = await client.downloadAny({ imageMessage: { url: "https://example.com" } });
-      expect(send).toHaveBeenCalledWith("downloadAny", {
-        message: { imageMessage: { url: "https://example.com" } },
-      });
+      expect(send).toHaveBeenCalledWith(
+        "downloadAny",
+        { message: { imageMessage: { url: "https://example.com" } } },
+        120_000,
+      );
       expect(result).toBe("/tmp/whatsmeow-123");
     });
   });
@@ -1101,14 +1106,18 @@ describe("WhatsmeowClient", () => {
         mediaKey: [5, 6],
         mediaType: "image",
       });
-      expect(send).toHaveBeenCalledWith("downloadMediaWithPath", {
-        directPath: "/media/file",
-        encFileHash: [1, 2],
-        fileHash: [3, 4],
-        mediaKey: [5, 6],
-        mediaType: "image",
-        mmsType: "",
-      });
+      expect(send).toHaveBeenCalledWith(
+        "downloadMediaWithPath",
+        {
+          directPath: "/media/file",
+          encFileHash: [1, 2],
+          fileHash: [3, 4],
+          mediaKey: [5, 6],
+          mediaType: "image",
+          mmsType: "",
+        },
+        120_000,
+      );
       expect(result).toBe("/tmp/media-123");
     });
 

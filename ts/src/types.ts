@@ -381,7 +381,8 @@ export interface WhatsmeowEvents {
   "qr:error": { event: string };
   log: { level: string; msg: string; [key: string]: unknown };
   error: Error;
-  exit: { code: number | null };
+  /** The current Go subprocess exited on its own. A child replaced by `close()`/`stop()` does not report. */
+  exit: { code: number | null; signal: NodeJS.Signals | null };
 }
 
 // ── IPC Protocol ───────────────────────────────────

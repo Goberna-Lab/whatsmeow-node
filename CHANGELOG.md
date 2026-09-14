@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 > **0.x** — We stay on 0.x because the upstream whatsmeow library is pre-1.0. Breaking changes are signaled by minor version bumps (`0.5 → 0.6`). Pin your version if stability matters.
 
+## [0.7.0-goberna.5] - 2026-09-14
+
+### Fixed
+
+- `GoProcess`: every `start()` is a generation that only speaks for itself. The late `exit` of a child replaced by `kill()` no longer clears the reference to the new child, rejects the new child's pending requests (its `init` failed with "exited with code null") or is reported as a crash; events still emitted by a replaced child are dropped. Measured on Hermes' VPS on 14-sep-2026: ten lines relaunched once a minute, one more orphan per line per round, 131 Go processes on the same session files.
+
+### Added
+
+- `client.stop()` / `GoProcess.stop()`: kill the subprocess and wait until it has really exited (SIGTERM, SIGKILL after 5 s), for callers that relaunch a session — the old process holds the session's SQLite file until it is gone.
+
 ## [0.7.0] - 2026-06-20
 
 ### Added

@@ -149,6 +149,13 @@ export class WhatsmeowClient extends EventEmitter {
     this.proc.kill();
   }
 
+  // Kill the Go subprocess and wait until it has really exited (SIGTERM, then
+  // SIGKILL after 5 s). Use this before calling `init()` again on the same
+  // session: the old process holds the session's SQLite file until it is gone.
+  async stop(): Promise<void> {
+    await this.proc.stop();
+  }
+
   // ── Pairing ────────────────────────────────────────
 
   // Maps to: client.GetQRChannel() — call before connect()

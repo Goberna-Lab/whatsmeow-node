@@ -356,8 +356,10 @@ interface WhatsmeowEvents {
         [key: string]: unknown;
     };
     error: Error;
+    /** The current Go subprocess exited on its own. A child replaced by `close()`/`stop()` does not report. */
     exit: {
         code: number | null;
+        signal: NodeJS.Signals | null;
     };
 }
 interface ClientOptions {
@@ -381,6 +383,7 @@ declare class WhatsmeowClient extends EventEmitter {
     isLoggedIn(): Promise<boolean>;
     waitForConnection(timeoutMs?: number): Promise<boolean>;
     close(): void;
+    stop(): Promise<void>;
     getQRChannel(): Promise<void>;
     pairCode(phone: string): Promise<string>;
     sendMessage(jid: JID, message: MessageContent): Promise<SendResponse>;

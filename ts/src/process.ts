@@ -11,8 +11,27 @@ interface PendingRequest {
   timer: ReturnType<typeof setTimeout>;
 }
 
+/**
+ * The Go subprocess behind one WhatsApp session.
+ *
+ * 🔴 EVERY `start()` IS A GENERATION, AND A GENERATION ONLY SPEAKS FOR ITSELF.
+ * `kill()` drops the reference at once and lets the old child die on its own
+ * time (SIGTERM, SIGKILL five seconds later) — so a caller that relaunches a
+ * line (`kill()` then `start()`) has the NEW child running while the OLD one is
+ * still exiting. Until 14-sep-2026 the handlers registered by `start()` acted on
+ * shared state, so the late `exit` of the old child cleared `this.proc` (the new
+ * child, now orphaned and unreachable), rejected every pending request (the new
+ * child's own `init`, with "exited with code null") and emitted `exit` (read by
+ * the consumer as a crash of the line). Measured in production: ten lines
+ * relaunched once a minute, one more orphan per line per round, 131 Go
+ * processes sitting on the same session files after forty minutes, zero lines
+ * connected. Each generation now owns its pending map and checks it is still
+ * the current child before touching `this.proc`, emitting an event or
+ * announcing its exit.
+ */
 export class GoProcess extends EventEmitter {
   private proc: ChildProcess | null = null;
+  /** In-flight requests of the CURRENT generation. `start()` opens a fresh map. */
   private pending = new Map<string, PendingRequest>();
   private commandTimeout: number;
   private cleanupHandler: (() => void) | null = null;
@@ -28,41 +47,54 @@ export class GoProcess extends EventEmitter {
   start(): void {
     if (this.proc) return;
 
-    this.proc = spawn(this.binaryPath, [], {
+    const child = spawn(this.binaryPath, [], {
       stdio: ["pipe", "pipe", "pipe"],
     });
+    const pending = new Map<string, PendingRequest>();
+    this.proc = child;
+    this.pending = pending;
+
+    // Is this child still the one this object serves? A replaced generation
+    // (`kill()`, `stop()`) keeps draining its own requests but stays silent.
+    const current = () => this.proc === child;
 
     // stdout: responses + events (JSON lines)
     // stdio: ["pipe", "pipe", "pipe"] guarantees these are non-null
-    const stdoutRl = createInterface({ input: this.proc.stdout as NodeJS.ReadableStream });
-    stdoutRl.on("line", (line) => this.handleStdoutLine(line));
+    const stdoutRl = createInterface({ input: child.stdout as NodeJS.ReadableStream });
+    stdoutRl.on("line", (line) => this.handleStdoutLine(line, pending, current));
 
     // stderr: structured logs (JSON lines)
-    const stderrRl = createInterface({ input: this.proc.stderr as NodeJS.ReadableStream });
-    stderrRl.on("line", (line) => this.handleStderrLine(line));
-
-    this.proc.on("exit", (code) => {
-      this.proc = null;
-      // Reject all pending requests
-      for (const [id, req] of this.pending) {
-        clearTimeout(req.timer);
-        req.reject(new ProcessExitedError(code));
-        this.pending.delete(id);
-      }
-      this.emit("exit", { code });
+    const stderrRl = createInterface({ input: child.stderr as NodeJS.ReadableStream });
+    stderrRl.on("line", (line) => {
+      if (current()) this.handleStderrLine(line);
     });
 
-    this.proc.on("error", (err) => {
-      this.emit("error", err);
+    child.on("exit", (code, signal) => {
+      const wasCurrent = current();
+      if (wasCurrent) this.proc = null;
+      // Reject this generation's pending requests — and only these.
+      for (const [id, req] of pending) {
+        clearTimeout(req.timer);
+        req.reject(new ProcessExitedError(code));
+        pending.delete(id);
+      }
+      // A generation that was already replaced died on purpose: nothing to report.
+      if (wasCurrent) this.emit("exit", { code, signal });
+    });
+
+    child.on("error", (err) => {
+      if (current()) this.emit("error", err);
     });
 
     // Let the child process not keep the event loop alive on its own.
     // Node will still wait for pending I/O (readline), but if user code
     // has nothing else to do, the process can exit and the "exit" handler
-    // below will clean up.
-    this.proc.unref();
+    // above will clean up.
+    child.unref();
 
-    // Orphan prevention: kill child when Node exits
+    // Orphan prevention: kill child when Node exits. One handler per object:
+    // a generation that crashed never removed its own.
+    if (this.cleanupHandler) process.removeListener("exit", this.cleanupHandler);
     this.cleanupHandler = () => this.kill();
     process.on("exit", this.cleanupHandler);
   }
@@ -74,14 +106,15 @@ export class GoProcess extends EventEmitter {
 
     const id = randomUUID();
     const command: IpcCommand = { id, cmd, args };
+    const pending = this.pending;
 
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.pending.delete(id);
+        pending.delete(id);
         reject(new TimeoutError(id));
       }, this.commandTimeout);
 
-      this.pending.set(id, { resolve, reject, timer });
+      pending.set(id, { resolve, reject, timer });
       const stdin = this.proc?.stdin;
       if (stdin) stdin.write(JSON.stringify(command) + "\n");
     });
@@ -89,7 +122,9 @@ export class GoProcess extends EventEmitter {
 
   /**
    * Kill the Go subprocess: SIGTERM first, SIGKILL if it is still alive after
-   * five seconds.
+   * five seconds. Returns at once; the child exits on its own time. If you are
+   * going to `start()` again, use `stop()`: the old child still holds the
+   * session's SQLite file, and that file does not admit two writers.
    *
    * 🔴 THE ESCALATION HAS TO HOLD ITS OWN REFERENCE. It used to read
    * `this.proc?.kill("SIGKILL")` inside the timer while `this.proc = null` ran
@@ -135,11 +170,33 @@ export class GoProcess extends EventEmitter {
     }
   }
 
+  /**
+   * Kill the Go subprocess and WAIT until it has actually exited: SIGTERM, then
+   * SIGKILL after five seconds, then the `exit` of the child. This is the call
+   * to make before starting the session again — the old process keeps the
+   * session's SQLite file open until it is gone, and a new child spawned on top
+   * of it dies at `init`. Resolves at once if there is nothing running.
+   */
+  async stop(): Promise<void> {
+    const proc = this.proc;
+    if (!proc) return;
+    const alreadyGone = proc.exitCode !== null || proc.signalCode !== null;
+    const exited = alreadyGone
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => proc.once("exit", () => resolve()));
+    this.kill();
+    await exited;
+  }
+
   get alive(): boolean {
     return this.proc !== null && !this.proc.killed;
   }
 
-  private handleStdoutLine(line: string): void {
+  private handleStdoutLine(
+    line: string,
+    pending: Map<string, PendingRequest>,
+    current: () => boolean,
+  ): void {
     let parsed: IpcResponse | IpcEvent;
     try {
       parsed = JSON.parse(line);
@@ -150,11 +207,11 @@ export class GoProcess extends EventEmitter {
     // Response (has `id`) vs Event (has `event`)
     if ("id" in parsed && typeof (parsed as IpcResponse).id === "string") {
       const resp = parsed as IpcResponse;
-      const req = this.pending.get(resp.id);
+      const req = pending.get(resp.id);
       if (!req) return;
 
       clearTimeout(req.timer);
-      this.pending.delete(resp.id);
+      pending.delete(resp.id);
 
       if (resp.ok) {
         req.resolve(resp.data);
@@ -162,6 +219,9 @@ export class GoProcess extends EventEmitter {
         req.reject(new WhatsmeowError(resp.error ?? "Unknown error", resp.code ?? "ERR_UNKNOWN"));
       }
     } else if ("event" in parsed) {
+      // A replaced generation may still emit (`disconnected` while it shuts
+      // down); the consumer must only hear the child it is actually talking to.
+      if (!current()) return;
       const evt = parsed as IpcEvent;
       this.emit(evt.event, evt.data);
     }

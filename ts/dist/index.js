@@ -40,31 +40,40 @@ var GoProcess = class extends EventEmitter {
     this.commandTimeout = commandTimeout;
   }
   proc = null;
+  /** In-flight requests of the CURRENT generation. `start()` opens a fresh map. */
   pending = /* @__PURE__ */ new Map();
   commandTimeout;
   cleanupHandler = null;
   start() {
     if (this.proc) return;
-    this.proc = spawn(this.binaryPath, [], {
+    const child = spawn(this.binaryPath, [], {
       stdio: ["pipe", "pipe", "pipe"]
     });
-    const stdoutRl = createInterface({ input: this.proc.stdout });
-    stdoutRl.on("line", (line) => this.handleStdoutLine(line));
-    const stderrRl = createInterface({ input: this.proc.stderr });
-    stderrRl.on("line", (line) => this.handleStderrLine(line));
-    this.proc.on("exit", (code) => {
-      this.proc = null;
-      for (const [id, req] of this.pending) {
+    const pending = /* @__PURE__ */ new Map();
+    this.proc = child;
+    this.pending = pending;
+    const current = () => this.proc === child;
+    const stdoutRl = createInterface({ input: child.stdout });
+    stdoutRl.on("line", (line) => this.handleStdoutLine(line, pending, current));
+    const stderrRl = createInterface({ input: child.stderr });
+    stderrRl.on("line", (line) => {
+      if (current()) this.handleStderrLine(line);
+    });
+    child.on("exit", (code, signal) => {
+      const wasCurrent = current();
+      if (wasCurrent) this.proc = null;
+      for (const [id, req] of pending) {
         clearTimeout(req.timer);
         req.reject(new ProcessExitedError(code));
-        this.pending.delete(id);
+        pending.delete(id);
       }
-      this.emit("exit", { code });
+      if (wasCurrent) this.emit("exit", { code, signal });
     });
-    this.proc.on("error", (err) => {
-      this.emit("error", err);
+    child.on("error", (err) => {
+      if (current()) this.emit("error", err);
     });
-    this.proc.unref();
+    child.unref();
+    if (this.cleanupHandler) process.removeListener("exit", this.cleanupHandler);
     this.cleanupHandler = () => this.kill();
     process.on("exit", this.cleanupHandler);
   }
@@ -74,19 +83,22 @@ var GoProcess = class extends EventEmitter {
     }
     const id = randomUUID();
     const command = { id, cmd, args };
+    const pending = this.pending;
     return new Promise((resolve2, reject) => {
       const timer = setTimeout(() => {
-        this.pending.delete(id);
+        pending.delete(id);
         reject(new TimeoutError(id));
       }, this.commandTimeout);
-      this.pending.set(id, { resolve: resolve2, reject, timer });
+      pending.set(id, { resolve: resolve2, reject, timer });
       const stdin = this.proc?.stdin;
       if (stdin) stdin.write(JSON.stringify(command) + "\n");
     });
   }
   /**
    * Kill the Go subprocess: SIGTERM first, SIGKILL if it is still alive after
-   * five seconds.
+   * five seconds. Returns at once; the child exits on its own time. If you are
+   * going to `start()` again, use `stop()`: the old child still holds the
+   * session's SQLite file, and that file does not admit two writers.
    *
    * 🔴 THE ESCALATION HAS TO HOLD ITS OWN REFERENCE. It used to read
    * `this.proc?.kill("SIGKILL")` inside the timer while `this.proc = null` ran
@@ -121,10 +133,25 @@ var GoProcess = class extends EventEmitter {
     } catch (_) {
     }
   }
+  /**
+   * Kill the Go subprocess and WAIT until it has actually exited: SIGTERM, then
+   * SIGKILL after five seconds, then the `exit` of the child. This is the call
+   * to make before starting the session again — the old process keeps the
+   * session's SQLite file open until it is gone, and a new child spawned on top
+   * of it dies at `init`. Resolves at once if there is nothing running.
+   */
+  async stop() {
+    const proc = this.proc;
+    if (!proc) return;
+    const alreadyGone = proc.exitCode !== null || proc.signalCode !== null;
+    const exited = alreadyGone ? Promise.resolve() : new Promise((resolve2) => proc.once("exit", () => resolve2()));
+    this.kill();
+    await exited;
+  }
   get alive() {
     return this.proc !== null && !this.proc.killed;
   }
-  handleStdoutLine(line) {
+  handleStdoutLine(line, pending, current) {
     let parsed;
     try {
       parsed = JSON.parse(line);
@@ -133,16 +160,17 @@ var GoProcess = class extends EventEmitter {
     }
     if ("id" in parsed && typeof parsed.id === "string") {
       const resp = parsed;
-      const req = this.pending.get(resp.id);
+      const req = pending.get(resp.id);
       if (!req) return;
       clearTimeout(req.timer);
-      this.pending.delete(resp.id);
+      pending.delete(resp.id);
       if (resp.ok) {
         req.resolve(resp.data);
       } else {
         req.reject(new WhatsmeowError(resp.error ?? "Unknown error", resp.code ?? "ERR_UNKNOWN"));
       }
     } else if ("event" in parsed) {
+      if (!current()) return;
       const evt = parsed;
       this.emit(evt.event, evt.data);
     }
@@ -238,6 +266,12 @@ var WhatsmeowClient = class extends EventEmitter2 {
   // Kill the Go subprocess. Called automatically if the Node process exits.
   close() {
     this.proc.kill();
+  }
+  // Kill the Go subprocess and wait until it has really exited (SIGTERM, then
+  // SIGKILL after 5 s). Use this before calling `init()` again on the same
+  // session: the old process holds the session's SQLite file until it is gone.
+  async stop() {
+    await this.proc.stop();
   }
   // ── Pairing ────────────────────────────────────────
   // Maps to: client.GetQRChannel() — call before connect()

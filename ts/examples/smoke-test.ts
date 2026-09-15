@@ -33,6 +33,10 @@ for (const evt of [
   "disconnected",
   "logged_out",
   "stream_error",
+  "stream_replaced",
+  "client_outdated",
+  "connect_failure",
+  "cat_refresh_error",
   "qr",
   "qr:timeout",
 ] as const) {

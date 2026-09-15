@@ -151,7 +151,11 @@ await client.connect();               // Starts connection (async, returns immed
 | `connected` | WhatsApp connection established | Safe to send messages |
 | `disconnected` | Connection lost | Auto-reconnect is built-in, no action needed |
 | `logged_out` | Session revoked (user unlinked device) | Must re-pair — delete store and start over |
+| `stream_replaced` | Another process connected with the same credentials | This session was kicked out — check for a duplicate login before re-pairing |
 | `stream_error` | Protocol error from WhatsApp | Usually followed by auto-reconnect |
+| `connect_failure` | Server rejected the connection with a reason (not one of the cases above) | Inspect `reason`/`message` — may or may not auto-reconnect depending on the cause |
+| `client_outdated` | Server rejected this build's client version | Upgrade the `whatsmeow` dependency, no reconnect will succeed until then |
+| `cat_refresh_error` | Failed to refresh the crypto auth token before reconnecting | Reconnect did not proceed — check `error` |
 | `keep_alive_timeout` | Keep-alive pings failing | Connection may be degraded |
 | `keep_alive_restored` | Keep-alive recovered | Connection is healthy again |
 
@@ -559,6 +563,10 @@ async function sendWithBackoff(client: WhatsmeowClient, messages: Array<{ jid: s
 - Avoid bulk operations on new/freshly paired numbers
 - Handle `temporary_ban` events — they include an expiry time
 - Monitor `stream_error` and `keep_alive_timeout` events as early warning signs
+- Treat `stream_replaced`, `client_outdated`, `connect_failure` and `cat_refresh_error` as
+  terminal for that connection attempt — a supervisor that blindly restarts on any disconnect
+  will busy-loop on `stream_replaced` (another process holds the session) or `client_outdated`
+  (no restart fixes an outdated client)
 - Use `sendPresence("available")` before sending to simulate normal client behavior
 
 ## Differences from whatsmeow

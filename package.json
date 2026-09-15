@@ -1,7 +1,7 @@
 {
   "name": "@whatsmeow-node/whatsmeow-node",
-  "version": "0.7.0-goberna.5",
-  "description": "Fork de @whatsmeow-node/whatsmeow-node con el registro de llamadas (call:log) — ver README-GOBERNA.md",
+  "version": "0.7.0-goberna.6",
+  "description": "Fork de @whatsmeow-node/whatsmeow-node con el registro de llamadas (call:log) y los eventos de desconexión — ver README-GOBERNA.md",
   "license": "MIT",
   "type": "module",
   "main": "ts/dist/index.cjs",

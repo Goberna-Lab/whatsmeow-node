@@ -26,11 +26,67 @@ func (a *App) eventHandler(evt interface{}) {
 	case *events.LoggedOut:
 		sendEvent("logged_out", map[string]interface{}{
 			"reason": v.Reason.String(),
+			// true si el rechazo llegó al conectar (connect failure); false si
+			// llegó en pleno uso (stream:error). Antes se descartaba, y con eso
+			// se perdía la única pista para distinguir un rechazo inmediato de
+			// una sesión que se cae ya conectada.
+			"onConnect": v.OnConnect,
 		})
 
+	// StreamReplaced: otro proceso se conectó con las mismas credenciales y
+	// WhatsApp expulsó a esta sesión. whatsmeow no adjunta datos — el hecho de
+	// que el evento exista ya es toda la señal. Es la causa más común de una
+	// "desconexión silenciosa": el vigilante la relevanta pensando que se cayó
+	// sola, cuando en realidad otra sesión (otra línea mal configurada, un
+	// proceso duplicado) la echó.
+	case *events.StreamReplaced:
+		sendEvent("stream_replaced", map[string]interface{}{})
+
 	case *events.StreamError:
-		sendEvent("stream_error", map[string]interface{}{
+		data := map[string]interface{}{
 			"code": v.Code,
+		}
+		// El nodo XML completo sólo viaja cuando whatsmeow no reconoce el
+		// código (ver connectionevents.go del propio whatsmeow): es el único
+		// rastro de qué mandó el servidor para un código nuevo que este
+		// binario todavía no traduce a un evento propio.
+		if v.Raw != nil {
+			data["raw"] = v.Raw.String()
+		}
+		sendEvent("stream_error", data)
+
+	// ConnectFailure: el servidor rechazó la conexión con un motivo que
+	// whatsmeow no reconoce como uno de sus casos internos (esos salen como
+	// LoggedOut o TemporaryBan). "reason" trae el código y su descripción
+	// (mismo formato que ya usa logged_out), "message" el texto que mandó el
+	// servidor y "raw" el nodo XML completo cuando viajó.
+	case *events.ConnectFailure:
+		data := map[string]interface{}{
+			"reason":  v.Reason.String(),
+			"message": v.Message,
+		}
+		if v.Raw != nil {
+			data["raw"] = v.Raw.String()
+		}
+		sendEvent("connect_failure", data)
+
+	// ClientOutdated: WhatsApp rechazó la conexión porque la versión de
+	// cliente que declara whatsmeow quedó vieja. Ningún reintento lo arregla:
+	// hace falta actualizar la dependencia go.mau.fi/whatsmeow.
+	case *events.ClientOutdated:
+		sendEvent("client_outdated", map[string]interface{}{})
+
+	// CATRefreshError: whatsmeow no pudo refrescar el token de cifrado
+	// (Client Access Token) antes de reconectar, y por eso la reconexión no
+	// sigue. El texto del error de Go es el único dato: no hay un código como
+	// en ConnectFailure.
+	case *events.CATRefreshError:
+		errMsg := ""
+		if v.Error != nil {
+			errMsg = v.Error.Error()
+		}
+		sendEvent("cat_refresh_error", map[string]interface{}{
+			"error": errMsg,
 		})
 
 	case *events.TemporaryBan:

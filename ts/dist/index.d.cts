@@ -242,11 +242,54 @@ interface WhatsmeowEvents {
         jid: JID;
     };
     disconnected: Record<string, never>;
+    /**
+     * onConnect distingue un rechazo al conectar (`true`) de una sesión que se
+     * cae ya conectada, en pleno uso (`false`) — whatsmeow lo manda en los dos
+     * casos, con el mismo `reason`.
+     */
     logged_out: {
         reason: string;
+        onConnect: boolean;
     };
+    /**
+     * `raw` sólo viaja cuando whatsmeow no reconoce el código: es el nodo XML
+     * completo que mandó el servidor, en su forma de texto.
+     */
     stream_error: {
         code: string;
+        raw?: string;
+    };
+    /**
+     * Otra sesión con las mismas credenciales se conectó y WhatsApp expulsó a
+     * esta — el caso típico de una "desconexión silenciosa": dos procesos (o
+     * dos líneas mal configuradas) hablándole al mismo número. whatsmeow no
+     * adjunta datos propios.
+     */
+    stream_replaced: Record<string, never>;
+    /**
+     * El servidor rechazó la versión de cliente que declara whatsmeow. Ningún
+     * reintento lo arregla — hace falta actualizar la dependencia
+     * `go.mau.fi/whatsmeow` de este puente.
+     */
+    client_outdated: Record<string, never>;
+    /**
+     * El servidor rechazó la conexión con un motivo que whatsmeow no traduce a
+     * uno de sus eventos internos (esos salen como `logged_out` o
+     * `temporary_ban`). `raw` sólo viaja cuando el nodo XML llegó con el
+     * evento.
+     */
+    connect_failure: {
+        reason: string;
+        message: string;
+        raw?: string;
+    };
+    /**
+     * whatsmeow no pudo refrescar el token de cifrado (CAT) antes de
+     * reconectar, y por eso la reconexión no sigue. `error` es el texto tal
+     * cual lo reportó Go — no hay un código como en `connect_failure`.
+     */
+    cat_refresh_error: {
+        error: string;
     };
     temporary_ban: {
         code: string;

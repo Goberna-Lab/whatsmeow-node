@@ -31,7 +31,11 @@ await client.connect();               // Starts connection (returns immediately)
 | `connected` | WhatsApp connection established | Safe to send messages |
 | `disconnected` | Connection lost | Auto-reconnect is built-in, no action needed |
 | `logged_out` | Session revoked (user unlinked device) | Must re-pair — delete store and start over |
+| `stream_replaced` | Another process connected with the same credentials | This session was kicked out — check for a duplicate login before re-pairing |
 | `stream_error` | Protocol error from WhatsApp | Usually followed by auto-reconnect |
+| `connect_failure` | Server rejected the connection with a reason (not one of the cases above) | Inspect `reason`/`message` — may or may not auto-reconnect depending on the cause |
+| `client_outdated` | Server rejected this build's client version | Upgrade the `whatsmeow` dependency, no reconnect will succeed until then |
+| `cat_refresh_error` | Failed to refresh the crypto auth token before reconnecting | Reconnect did not proceed — check `error` |
 | `keep_alive_timeout` | Keep-alive pings failing | Connection may be degraded |
 | `keep_alive_restored` | Keep-alive recovered | Connection is healthy again |
 

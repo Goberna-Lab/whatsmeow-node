@@ -251,8 +251,12 @@ Complete list of events emitted by the Go binary (see `events.go:eventHandler`).
 | `qr` | `{ code }` | QR code string for pairing |
 | `connected` | `{ jid }` | Successfully connected |
 | `disconnected` | `{}` | Connection lost |
-| `logged_out` | `{ reason }` | Logged out (session cleared) |
-| `stream_error` | `{ code }` | WebSocket stream error |
+| `logged_out` | `{ reason, onConnect }` | Logged out (session cleared). `onConnect` is true when the rejection happened while connecting, false when the session dropped mid-use |
+| `stream_replaced` | `{}` | Another process connected with the same credentials and WhatsApp kicked this session out |
+| `stream_error` | `{ code, raw? }` | WebSocket stream error. `raw` (the XML node) is only present when whatsmeow didn't recognize the code |
+| `connect_failure` | `{ reason, message, raw? }` | Server rejected the connection with a reason whatsmeow doesn't translate into one of its own events (those come out as `logged_out` or `temporary_ban`) |
+| `client_outdated` | `{}` | Server rejected this whatsmeow build's client version |
+| `cat_refresh_error` | `{ error }` | whatsmeow failed to refresh the CAT (crypto auth token) before reconnecting |
 | `temporary_ban` | `{ code, expire }` | Temporarily banned |
 | `keep_alive_timeout` | `{ errorCount }` | Server keep-alive timeout |
 | `keep_alive_restored` | `{}` | Keep-alive restored |

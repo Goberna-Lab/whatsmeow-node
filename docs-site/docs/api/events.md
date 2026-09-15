@@ -23,8 +23,12 @@ client.on("connected", ({ jid }) => { /* ... */ });
 |-------|---------|-------------|
 | `connected` | `{ jid: string }` | WhatsApp connection established. Safe to send messages. |
 | `disconnected` | `{}` | Connection lost. Auto-reconnect is automatic. |
-| `logged_out` | `{ reason: string }` | Session revoked. Must re-pair. |
-| `stream_error` | `{ code: string }` | Protocol error. Usually followed by auto-reconnect. |
+| `logged_out` | `{ reason: string, onConnect: boolean }` | Session revoked. Must re-pair. `onConnect` is `true` when the rejection happened while connecting, `false` when the session dropped mid-use. |
+| `stream_replaced` | `{}` | Another process connected with the same credentials and WhatsApp kicked this session out. No auto-reconnect will help — check for a duplicate login. |
+| `stream_error` | `{ code: string, raw?: string }` | Protocol error. Usually followed by auto-reconnect. `raw` (the XML node as text) is only present when whatsmeow didn't recognize the code. |
+| `connect_failure` | `{ reason: string, message: string, raw?: string }` | Server rejected the connection with a reason whatsmeow doesn't translate into one of its own events (those come out as `logged_out` or `temporary_ban`). `raw` is only present when the XML node travelled with the event. |
+| `client_outdated` | `{}` | Server rejected this build's client version. No reconnect will succeed until the `whatsmeow` dependency is upgraded. |
+| `cat_refresh_error` | `{ error: string }` | whatsmeow failed to refresh the CAT (crypto auth token) before reconnecting, so the reconnect did not proceed. |
 | `temporary_ban` | `{ code: string, expire: string }` | Temporary ban from WhatsApp. |
 | `keep_alive_timeout` | `{ errorCount: number }` | Keep-alive pings failing. Connection may be degraded. |
 | `keep_alive_restored` | `{}` | Keep-alive recovered. Connection is healthy. |

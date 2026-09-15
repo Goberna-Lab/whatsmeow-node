@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 > **0.x** — We stay on 0.x because the upstream whatsmeow library is pre-1.0. Breaking changes are signaled by minor version bumps (`0.5 → 0.6`). Pin your version if stability matters.
 
+## [0.7.0-goberna.6] - 2026-09-15
+
+### Added (en español — este agregado es de Goberna, no de upstream)
+
+whatsmeow ya emitía `*events.StreamReplaced`, `*events.ClientOutdated`, `*events.ConnectFailure`
+y `*events.CATRefreshError`, pero `events.go` no traducía ninguno: el switch de `eventHandler`
+los dejaba caer sin más. En producción (Hermes, VPS1) las diez líneas de WhatsApp perdían el
+socket cada pocos minutos y el vigilante las relanzaba — 175 veces en 3 h — sin que el journal
+dijera nunca por qué, porque la causa real nunca llegaba a Node.
+
+- `stream_replaced`: otra sesión con las mismas credenciales se conectó y WhatsApp expulsó a
+  esta — la causa más común de una desconexión "silenciosa".
+- `client_outdated`: el servidor rechazó la versión de cliente que declara whatsmeow.
+- `connect_failure`: el servidor rechazó la conexión con un motivo propio (`reason`, `message`
+  y `raw` cuando el nodo XML viajó con el evento).
+- `cat_refresh_error`: whatsmeow no pudo refrescar el token de cifrado antes de reconectar
+  (`error`).
+- `logged_out` suma `onConnect` y `stream_error` suma `raw` (opcional) — ninguno de los dos
+  cambia la forma que ya tenían.
+
+Ver `README-GOBERNA.md` § Eventos de desconexión para el detalle y los ejemplos de uso.
+
 ## [0.7.0-goberna.5] - 2026-09-14
 
 ### Fixed

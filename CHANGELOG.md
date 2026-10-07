@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 > **0.x** — We stay on 0.x because the upstream whatsmeow library is pre-1.0. Breaking changes are signaled by minor version bumps (`0.5 → 0.6`). Pin your version if stability matters.
 
+## [0.7.0-goberna.7] - 2026-10-07
+
+### Fixed (en español — este arreglo es de Goberna, no de upstream)
+
+El 5-oct-2026 WhatsApp empezó a rechazar la versión de cliente que declaraba este binario
+(`2.3000.1040847988`, horneada en el whatsmeow del 11-jun) y todas las líneas de Hermes se
+cayeron en media hora con `client_outdated`, sin que nada cambiara de este lado. Con la versión
+horneada, la única salida era recompilar.
+
+- Al arrancar, el binario elige qué versión de WhatsApp Web declara:
+  1. `WHATSMEOW_WA_VERSION=2.3000.N` si está — la manda el operador y gana siempre.
+     `WHATSMEOW_WA_VERSION=compilada` apaga la consulta.
+  2. Si no, la consulta a web.whatsapp.com (`whatsmeow.GetLatestVersion`, 8 s de tope), y
+     sólo si es **más nueva** que la horneada: una respuesta rara nunca puede bajarla.
+  3. Si las dos fallan, la horneada — lo mismo que antes.
+- Lo dice en stderr (`versión de WhatsApp Web`, con `version`, `origen`, `compilada` y
+  `motivo`), que Hermes reenvía al journal.
+
+Verificado contra WhatsApp con una sesión vacía: el binario anterior recibe `client_outdated`,
+éste recibe el QR (tomó `2.3000.1049569619` de la web).
+
 ## [0.7.0-goberna.6] - 2026-09-15
 
 ### Added (en español — este agregado es de Goberna, no de upstream)

@@ -104,6 +104,7 @@ func main() {
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 
 	logInfo("whatsmeow-node started", "pid", os.Getpid())
+	ajustarVersionDeWhatsApp()
 
 	for scanner.Scan() {
 		line := scanner.Bytes()

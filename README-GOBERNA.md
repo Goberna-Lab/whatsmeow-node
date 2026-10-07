@@ -122,6 +122,25 @@ Cubierto por `cmd/whatsmeow-node/events_disconnect_test.go` (Go) y
 `ts/src/__tests__/client-eventos-desconexion.test.ts` (TypeScript, simulando una línea JSON real
 por el stdout de un proceso Go falso).
 
+## La versión de WhatsApp Web que se declara
+
+whatsmeow hornea la versión de WhatsApp Web que declara, y WhatsApp rechaza las viejas con
+`client_outdated`. El 5-oct-2026 eso tumbó todas las líneas de Hermes a la vez, y la única
+salida era recompilar. Ahora el binario la elige al arrancar (`cmd/whatsmeow-node/version.go`):
+
+1. **`WHATSMEOW_WA_VERSION=2.3000.N`**, si está: la palanca del operador. Gana siempre.
+   `WHATSMEOW_WA_VERSION=compilada` apaga la consulta.
+2. Si no, **la consulta a web.whatsapp.com** (`whatsmeow.GetLatestVersion`), y sólo si es más
+   nueva que la horneada.
+3. Si no, la horneada.
+
+Lo dice en una línea de stderr (`versión de WhatsApp Web`). **Si vuelve un `client_outdated`**:
+mira esa línea en el journal, pon la versión vigente en `WHATSMEOW_WA_VERSION` del `.env` y
+reinicia. Para saber cuál es la vigente, ve el `var waVersion` de `store/clientpayload.go` en
+whatsmeow upstream.
+
+Cubierto por `cmd/whatsmeow-node/version_test.go`.
+
 ## Lo que cambia respecto del original, para poder instalarlo desde git
 
 El paquete npm del proyecto vive en `ts/`, así que el repo **no tenía `package.json` en la

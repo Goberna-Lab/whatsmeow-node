@@ -386,6 +386,20 @@ interface WhatsmeowEvents {
     history_sync: {
         type: string;
     };
+    /**
+     * One message carried by a history sync batch — what the phone pushes when
+     * the device is linked, or answers to an on-demand request. Same `info` and
+     * `message` as `"message"`, plus the batch's `syncType`.
+     *
+     * Kept apart from `"message"` on purpose: a consumer that reacts to live
+     * traffic (auto-replies, notifications) must not fire on a week-old message.
+     * Status broadcasts and protocol stubs are not forwarded.
+     */
+    "history:message": {
+        syncType: string;
+        info: MessageInfo;
+        message: Record<string, unknown>;
+    };
     qr: {
         code: string;
     };

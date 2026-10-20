@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 > **0.x** — We stay on 0.x because the upstream whatsmeow library is pre-1.0. Breaking changes are signaled by minor version bumps (`0.5 → 0.6`). Pin your version if stability matters.
 
+## [0.7.0-goberna.8] - 2026-10-20
+
+### Added (en español — este agregado es de Goberna, no de upstream)
+
+Los mensajes del historial que empuja el teléfono se tiraban en el `case *events.HistorySync`
+de `events.go`, que sólo reenviaba el tipo de tanda y el registro de llamadas. El 19-oct-2026
+una línea de Hermes se re-vinculó después de una semana caída (12 al 19-oct) y esa semana no
+volvió: la tanda llegó al proceso Go con los mensajes adentro y se descartó ahí.
+
+- Evento nuevo **`history:message`**, uno por mensaje de la tanda, con el mismo `info` y
+  `message` que `message` más el `syncType` de la tanda. Va **aparte** de `message` a
+  propósito: quien reacciona al tráfico en vivo (una auto-respuesta, un aviso) no puede
+  dispararse por un mensaje de hace una semana.
+- No se reenvían los estados (`status@broadcast`) ni las entradas sin mensaje (stubs de
+  protocolo). Un mensaje que no se puede parsear se salta solo, sin costar el resto.
+
+Cubierto por `cmd/whatsmeow-node/events_history_test.go` y
+`ts/src/__tests__/client-historial.test.ts`.
+
 ## [0.7.0-goberna.7] - 2026-10-07
 
 ### Fixed (en español — este arreglo es de Goberna, no de upstream)

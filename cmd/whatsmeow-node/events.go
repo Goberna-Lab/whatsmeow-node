@@ -1,7 +1,9 @@
 package main
 
 import (
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/proto/waSyncAction"
+	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -224,6 +226,17 @@ func (a *App) eventHandler(evt interface{}) {
 		sendEvent("history_sync", map[string]interface{}{
 			"type": v.Data.GetSyncType().String(),
 		})
+		// The messages inside the batch used to be dropped here, so whatever
+		// the phone pushed on link (or answered to an on-demand request) never
+		// reached Node. They go out as "history:message" and NOT as "message":
+		// a consumer that reacts to live traffic (auto-replies, notifications)
+		// must not fire on a week-old message.
+		a.mu.Lock()
+		client := a.client
+		a.mu.Unlock()
+		if client != nil {
+			forwardHistoryMessages(v.Data, client.ParseWebMessage)
+		}
 		// The phone pushes its call log alongside the message history. Each
 		// record is forwarded on its own so the Node side has a single shape to
 		// handle, whether it came from the initial sync or from a later
@@ -300,6 +313,43 @@ func serializeCallLogRecord(r *waSyncAction.CallLogRecord, source string) map[st
 	out["participants"] = participants
 
 	return out
+}
+
+// forwardHistoryMessages emits one "history:message" per message carried by a
+// history sync batch, with the same {info, message} shape as "message" plus the
+// sync type. parse is client.ParseWebMessage, taken as a parameter so the
+// walk can be tested without a logged-in client.
+//
+// Skipped, because they are never something a person wrote: status broadcasts
+// (a whole batch type of their own, INITIAL_STATUS_V3) and entries without a
+// message (protocol stubs such as "joined using link"). A message that fails
+// to parse is skipped alone; it cannot cost the rest of the batch.
+func forwardHistoryMessages(
+	data *waHistorySync.HistorySync,
+	parse func(types.JID, *waWeb.WebMessageInfo) (*events.Message, error),
+) {
+	syncType := data.GetSyncType().String()
+	for _, conv := range data.GetConversations() {
+		chat, err := types.ParseJID(conv.GetID())
+		if err != nil || chat.Server == types.BroadcastServer {
+			continue
+		}
+		for _, hm := range conv.GetMessages() {
+			web := hm.GetMessage()
+			if web == nil || web.GetMessage() == nil {
+				continue
+			}
+			evt, err := parse(chat, web)
+			if err != nil || evt.Message == nil {
+				continue
+			}
+			sendEvent("history:message", map[string]interface{}{
+				"syncType": syncType,
+				"info":     serializeMessageInfo(evt.Info),
+				"message":  protoToMap(evt.Message),
+			})
+		}
+	}
 }
 
 func serializeMessageInfo(info types.MessageInfo) map[string]interface{} {

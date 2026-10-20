@@ -1,12 +1,14 @@
 # Fork de `whatsmeow-node` — registro de llamadas y eventos de desconexión
 
 Este repo es un fork de [`nicastelo/whatsmeow-node`](https://github.com/nicastelo/whatsmeow-node)
-(MIT) con **dos agregados**, los dos aislados en `cmd/whatsmeow-node/events.go`:
+(MIT) con **tres agregados**, los tres aislados en `cmd/whatsmeow-node/events.go`:
 
 1. Exponer al lado JavaScript el **registro de llamadas** que WhatsApp le sincroniza a un
    dispositivo vinculado.
 2. Traducir los **eventos de desconexión** que whatsmeow ya emite pero que el binario original
    descartaba, así que una caída de sesión llegaba a Node sin decir por qué.
+3. Reenviar los **mensajes del historial** que empuja el teléfono, que el binario original
+   descartaba (`history:message`).
 
 Lo consume [Hermes](https://github.com/Goberna-Lab/hermes), el CRM de la Escuela: el registro de
 llamadas para su vista **Llamadas**, los eventos de desconexión para que el vigilante que
@@ -121,6 +123,25 @@ cliente.on('stream_error', (se) => {
 Cubierto por `cmd/whatsmeow-node/events_disconnect_test.go` (Go) y
 `ts/src/__tests__/client-eventos-desconexion.test.ts` (TypeScript, simulando una línea JSON real
 por el stdout de un proceso Go falso).
+
+## Mensajes del historial
+
+El teléfono le empuja su historial al dispositivo recién vinculado (`INITIAL_BOOTSTRAP`,
+`RECENT`, …) y también lo manda cuando se le pide (`ON_DEMAND`). El binario original reenviaba
+el tipo de tanda y tiraba los mensajes; este fork los saca uno por uno:
+
+```ts
+cliente.on('history:message', ({ syncType, info, message }) => {
+  // info y message: la misma forma que el evento 'message'
+})
+```
+
+🔴 **No viaja como `message`**, y eso es lo que importa: un consumidor que contesta o avisa en
+cuanto llega un mensaje se dispararía con cada mensaje viejo de la tanda. `info.timestamp` trae
+la fecha original del mensaje. No se reenvían los estados ni los stubs de protocolo.
+
+Cubierto por `cmd/whatsmeow-node/events_history_test.go` y
+`ts/src/__tests__/client-historial.test.ts`.
 
 ## La versión de WhatsApp Web que se declara
 

@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 > **0.x** — We stay on 0.x because the upstream whatsmeow library is pre-1.0. Breaking changes are signaled by minor version bumps (`0.5 → 0.6`). Pin your version if stability matters.
 
+## [0.7.0-goberna.7.1] - 2026-10-23
+
+### Fixed (en español — el arreglo es de upstream, la subida es de Goberna)
+
+Sale de `0.7.0-goberna.7`, **no** de `0.7.0-goberna.8` (`feat/historial-de-mensajes`), que
+todavía no tiene esto: quien despliegue goberna.8 tiene que traerlo, o vuelve el defecto.
+
+El whatsmeow del 11-jun descartaba sin ack los nodos `<status>`. WhatsApp deja de entregar lo
+que viene detrás del nodo sin confirmar y a los ~50 min corta con
+`<stream:error><ack class="status" id=… type="media"/>`; al reconectar salen unos pocos
+mensajes y la cola se vuelve a trabar. En Hermes, una línea recibió así del 15 al 23-oct-2026:
+en orden, pero un día y medio tarde.
+
+- `go.mau.fi/whatsmeow` sube a `a238105` («client: handle <status> nodes», 20-jul-2026), que
+  acka el nodo. Es el commit justo del arreglo, no la punta de upstream.
+- `whatsmeow_piso_test.go` se pone rojo si whatsmeow vuelve a quedar por debajo de ese commit.
+- Binario linux-x64 de la raíz regenerado.
+
 ## [0.7.0-goberna.7] - 2026-10-07
 
 ### Fixed (en español — este arreglo es de Goberna, no de upstream)
